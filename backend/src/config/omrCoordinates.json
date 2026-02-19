@@ -1,0 +1,26 @@
+{
+  "pageWidth": 216,
+  "pageHeight": 279,
+  "columns": 3,
+  "questionsPerColumn": 49,
+  "bubble": {
+    "diameter": 4,
+    "spacingX": 6,
+    "spacingY": 6
+  },
+  "gridOrigin": {
+    "x": 20,
+    "y": 30
+  },
+  "margins": {
+    "top": 15,
+    "right": 15,
+    "bottom": 15,
+    "left": 15
+  },
+  "qr": {
+    "x": 176,
+    "y": 15,
+    "size": 25
+  }
+}

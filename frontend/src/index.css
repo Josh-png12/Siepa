@@ -1,0 +1,111 @@
+/* ============================================= */
+/*  index.css - SIEPA (Simulador Saber 11°)      */
+/*  Paleta ICFES + Diseño Moderno Educativo      */
+/* ============================================= */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==================== VARIABLES CSS ==================== */
+:root {
+  /* Colores principales */
+  --color-primary: #002855;      /* Azul ICFES oscuro */
+  --color-secondary: #00a3e0;    /* Azul claro */
+  --color-accent: #3b82f6;
+
+  /* Neutros */
+  --color-bg: #f8fafc;
+  --color-card: #ffffff;
+  --color-text: #1e2937;
+  --color-text-light: #64748b;
+  --color-border: #e2e8f0;
+
+  /* Gradientes */
+  --gradient-primary: linear-gradient(135deg, #002855 0%, #00a3e0 100%);
+  --gradient-soft: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+}
+
+/* ==================== BASE STYLES ==================== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==================== TYPOGRAPHY SCALE ==================== */
+h1 { font-size: 2.75rem; font-weight: 800; }
+h2 { font-size: 2.25rem; font-weight: 700; }
+h3 { font-size: 1.75rem; font-weight: 700; }
+h4 { font-size: 1.5rem;  font-weight: 600; }
+
+/* ==================== FOCUS & ACCESSIBILITY ==================== */
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+/* ==================== SCROLLBAR ==================== */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { 
+  background: #94a3b8; 
+  border-radius: 20px; 
+}
+
+/* ==================== COMPONENTES REUTILIZABLES ==================== */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: white;
+  font-weight: 600;
+  padding: 14px 28px;
+  border-radius: 14px;
+  transition: all 0.25s ease;
+  font-size: 1.1rem;
+}
+
+.btn-primary:hover {
+  background-color: #001f40;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgb(0 40 85 / 0.3);
+}
+
+.card {
+  background-color: var(--color-card);
+  border-radius: 20px;
+  box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.08);
+  border: 1px solid var(--color-border);
+}
+
+/* ==================== UTILITIES ICFES ==================== */
+.text-icfes { color: var(--color-primary); }
+.bg-icfes { background-color: var(--color-primary); }
+
+.text-icfes-light { color: #e0f2fe; }
+.bg-icfes-light { background-color: #e0f2fe; }
+
+.gradient-icfes {
+  background: var(--gradient-primary);
+}
+
+/* ==================== LOGIN SPECIFIC ==================== */
+.login-card {
+  box-shadow: 0 25px 50px -12px rgb(0 40 85 / 0.25);
+}

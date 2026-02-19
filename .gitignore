@@ -1,0 +1,34 @@
+# Node
+node_modules/
+package-lock.json
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Uploads & temp
+uploads/
+backend/uploads/
+frontend/uploads/
+
+# OCR trained data
+eng.traineddata
+spa.traineddata
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# Vite
+frontend/dist/
+
+# Coverage
+coverage/

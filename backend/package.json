@@ -1,0 +1,42 @@
+{
+  "name": "siepa-backend",
+  "version": "1.0.0",
+  "description": "Backend para SIEPA ap",
+  "main": "src/app.js",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "pdf-import:assert": "node scripts/manualPdfImportAssert.js",
+    "rebuild:native": "npm rebuild canvas --build-from-source",
+    "reinstall:clean": "rimraf node_modules package-lock.json && npm install"
+  },
+  "dependencies": {
+    "@bdelab/jscat": "^5.2.3",
+    "bcryptjs": "2.4.3",
+    "canvas": "2.11.2",
+    "cors": "2.8.6",
+    "dotenv": "16.0.3",
+    "express": "4.18.2",
+    "express-async-handler": "1.2.0",
+    "helmet": "6.0.1",
+    "jsonwebtoken": "9.0.0",
+    "jspdf": "2.5.1",
+    "mongodb": "4.1",
+    "mongoose": "7.8.7",
+    "multer": "2.0.2",
+    "pdf-parse": "^1.1.1",
+    "pdf2pic": "3.2.0",
+    "pdfjs-dist": "^4.8.69",
+    "rate-limiter-flexible": "2.4.1",
+    "tesseract.js": "^6.0.1",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.1.0",
+    "nodemon": "^2.0.20",
+    "rimraf": "^6.0.1"
+  }
+}
