@@ -239,10 +239,9 @@ Este proyecto está bajo la Licencia MIT. Ver `LICENSE` para más detalles.
 
 ## 👨‍💻 Autor
 
-**[Tu Nombre]**
-- GitHub: [@tu-usuario](https://github.com/tu-usuario)
-- LinkedIn: [tu-perfil](https://linkedin.com/in/tu-perfil)
-- Email: tu.email@example.com
+**Joshua David Navarro Rad**
+
+- Email: joshuanavarro933@gmail.com
 
 ## 💬 Contacto & Soporte
 
