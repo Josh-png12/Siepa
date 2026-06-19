@@ -601,9 +601,8 @@ const getGovernanceStats = async ({ schoolId, forceRefresh = false }) => {
   if (!forceRefresh && cached && now - cached.createdAt < CACHE_TTL_MS) return cached.value;
 
   const simulacros = await prisma.physicalSimulacro.findMany({
-    where: { schoolId },
-    include: { courses: { select: { id: true, enrollments: { select: { studentId: true } } } } },
-    select: { id: true, title: true, status: true, totalQuestions: true, createdAt: true, courses: true }
+    where: { ...(schoolId && { schoolId }) },
+    include: { courses: { select: { id: true, enrollments: { select: { studentId: true } } } } }
   });
 
   const simulacroIds = simulacros.map((s) => s.id);
