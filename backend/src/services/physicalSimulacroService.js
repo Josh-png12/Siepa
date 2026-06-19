@@ -1,13 +1,8 @@
 const fs = require('fs/promises');
 const path = require('path');
-const mongoose = require('mongoose');
+const { Prisma } = require('@prisma/client');
+const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
-const PhysicalSimulacro = require('../models/PhysicalSimulacro');
-const PhysicalAnswerSheet = require('../models/PhysicalAnswerSheet');
-const Course = require('../models/Course');
-const User = require('../models/User');
-const Evaluation = require('../models/Evaluation');
-const StudentProgress = require('../models/StudentProgress');
 const { parsePDF, evaluateAnswerSheet } = require('./omrService');
 const { estimateTheta } = require('./triService');
 const ocrQueue = require('./ocrProcessingQueue');
@@ -17,34 +12,39 @@ const {
   validateCreatePhysicalSimulacroPayload,
   validateReviewPayload
 } = require('../validators/physicalSimulacroValidators');
-const { isObjectId } = require('../validators/commonValidators');
 
-const OCR_REVIEW_WINDOW_DAYS = Number(process.env.OCR_REVIEW_WINDOW_DAYS || 7);
 const FILE_RETENTION_DAYS = Number(process.env.FILE_RETENTION_DAYS || 14);
 
-const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
-
 const ensureTeacherAccess = async ({ simulacroId, user }) => {
-  if (!isObjectId(simulacroId)) throw new ApiError(400, 'ValidationError', ['Invalid simulacro id']);
+  const where = { id: simulacroId };
+  if (user.role !== 'admin') where.teacherId = user.id;
 
-  const where = { _id: simulacroId };
-  if (user.role !== 'admin') where.teacher = user.id;
+  const simulacro = await prisma.physicalSimulacro.findFirst({
+    where,
+    include: {
+      answerKey: { orderBy: { questionNumber: 'asc' } },
+      courses: { select: { id: true, name: true, grade: true } }
+    }
+  });
 
-  const simulacro = await PhysicalSimulacro.findOne(where).lean();
   if (!simulacro) throw new ApiError(404, 'NotFound', ['Physical simulacro not found or no access']);
-
   return simulacro;
 };
 
-const ensureStudentInSimulacroCourses = async ({ studentId, simulacro }) => {
-  const course = await Course.findOne({
-    _id: { $in: simulacro.courses },
-    students: studentId
-  })
-    .select('_id name')
-    .lean();
+// Check if a student (by userId) is enrolled in any course assigned to this simulacro
+const ensureStudentInSimulacroCourses = async ({ studentUserId, simulacroId }) => {
+  const studentRecord = await prisma.student.findUnique({ where: { userId: studentUserId } });
+  if (!studentRecord) return null;
 
-  return course;
+  const enrollment = await prisma.courseEnrollment.findFirst({
+    where: {
+      studentId: studentRecord.id,
+      course: { physicalSimulacros: { some: { id: simulacroId } } }
+    },
+    include: { course: { select: { id: true, name: true } } }
+  });
+
+  return enrollment?.course || null;
 };
 
 const buildThetaCalculator = (answerKey = []) => {
@@ -66,35 +66,48 @@ const buildThetaCalculator = (answerKey = []) => {
   };
 };
 
-const computeExpectedStudents = async (courseIds) => {
-  const courses = await Course.find({ _id: { $in: courseIds } })
-    .select('students')
-    .lean();
+const computeExpectedStudents = async (simulacroId) => {
+  const simulacro = await prisma.physicalSimulacro.findUnique({
+    where: { id: simulacroId },
+    include: { courses: { select: { id: true } } }
+  });
+  if (!simulacro) return 0;
 
-  const unique = new Set(courses.flatMap((course) => (course.students || []).map((id) => String(id))));
-  return unique.size;
+  const courseIds = simulacro.courses.map((c) => c.id);
+  if (!courseIds.length) return 0;
+
+  // COUNT DISTINCT studentId because a student may be enrolled in multiple courses
+  const result = await prisma.$queryRaw`
+    SELECT COUNT(DISTINCT "studentId")::int AS count
+    FROM "CourseEnrollment"
+    WHERE "courseId" IN (${Prisma.join(courseIds)})
+  `;
+
+  return Number(result[0]?.count || 0);
 };
 
-const createAdminPhysicalSimulacro = async ({ userId, payload }) => {
+const createAdminPhysicalSimulacro = async ({ userId, schoolId, payload }) => {
   const validation = validateCreatePhysicalSimulacroPayload(payload);
   if (validation.errors) throw new ApiError(400, 'ValidationError', validation.errors);
 
   const data = validation.value;
 
-  const teacher = await User.findOne({ _id: data.teacher, role: 'docente' })
-    .select('_id features.physicalSimulacros')
-    .lean();
+  const teacher = await prisma.user.findFirst({
+    where: { id: data.teacher, role: 'docente', schoolId },
+    select: { id: true, schoolId: true, featurePhysicalSimulacros: true }
+  });
   if (!teacher) throw new ApiError(404, 'NotFound', ['Teacher not found']);
 
-  const courses = await Course.find({ _id: { $in: data.courses } })
-    .select('_id teacher')
-    .lean();
+  const courses = await prisma.course.findMany({
+    where: { id: { in: data.courses }, schoolId },
+    select: { id: true, teacherId: true }
+  });
 
   if (courses.length !== data.courses.length) {
     throw new ApiError(404, 'NotFound', ['One or more courses not found']);
   }
 
-  const unauthorized = courses.find((course) => String(course.teacher) !== String(data.teacher));
+  const unauthorized = courses.find((c) => c.teacherId !== data.teacher);
   if (unauthorized) {
     throw new ApiError(403, 'Forbidden', ['All courses must belong to assigned teacher']);
   }
@@ -104,81 +117,76 @@ const createAdminPhysicalSimulacro = async ({ userId, payload }) => {
 
   const status = data.answerKey.length === data.totalQuestions ? 'readyForUpload' : 'answerKeyPending';
 
-  const simulacro = await PhysicalSimulacro.create({
-    title: data.title,
-    description: data.description,
-    teacher: data.teacher,
-    courses: data.courses,
-    date: data.date,
-    startTime: data.startTime,
-    endTime: data.endTime,
-    status,
-    totalQuestions: data.totalQuestions,
-    answerKey: data.answerKey,
-    reviewDeadline
-  });
-
-  await logAudit({
-    userId,
-    action: 'create',
-    entityType: 'PhysicalSimulacro',
-    entityId: simulacro._id,
-    metadata: {
+  const simulacro = await prisma.physicalSimulacro.create({
+    data: {
+      schoolId: teacher.schoolId,
+      title: data.title,
+      description: data.description || '',
+      teacherId: data.teacher,
+      date: new Date(data.date),
+      startTime: data.startTime || null,
+      endTime: data.endTime || null,
       status,
-      teacher: data.teacher,
-      totalQuestions: data.totalQuestions
+      totalQuestions: data.totalQuestions,
+      reviewDeadline,
+      courses: { connect: data.courses.map((id) => ({ id })) },
+      answerKey: {
+        create: data.answerKey.map((key) => ({
+          questionNumber: key.questionNumber,
+          correctOption: key.correctOption
+        }))
+      }
+    },
+    include: {
+      teacher: { select: { id: true, name: true, email: true } },
+      courses: { select: { id: true, name: true, grade: true } },
+      answerKey: { orderBy: { questionNumber: 'asc' } }
     }
   });
 
-  const populated = await PhysicalSimulacro.findById(simulacro._id)
-    .populate('teacher', 'name email')
-    .populate('courses', 'name grade year')
-    .lean();
+  await logAudit({
+    schoolId: simulacro.schoolId,
+    userId,
+    action: 'create',
+    entityType: 'PhysicalSimulacro',
+    entityId: simulacro.id,
+    metadata: { status, teacher: data.teacher, totalQuestions: data.totalQuestions }
+  });
 
-  return populated;
+  return simulacro;
 };
 
-const buildTeacherSimulacroStats = async (simulacroIds, courseIdsBySimulacro) => {
+const buildTeacherSimulacroStats = async (simulacroIds) => {
+  if (!simulacroIds.length) return { sheetMap: new Map(), scoreMap: new Map(), expectedMap: new Map() };
+
   const [sheetStats, scoreStats] = await Promise.all([
-    PhysicalAnswerSheet.aggregate([
-      { $match: { simulacroId: { $in: simulacroIds } } },
-      {
-        $group: {
-          _id: '$simulacroId',
-          sheetsReceived: { $sum: 1 },
-          sheetsPendingReview: {
-            $sum: { $cond: [{ $eq: ['$status', 'needsReview'] }, 1, 0] }
-          },
-          duplicatesDetected: {
-            $sum: { $cond: [{ $eq: ['$status', 'duplicate'] }, 1, 0] }
-          }
-        }
-      }
-    ]),
-    PhysicalAnswerSheet.aggregate([
-      {
-        $match: {
-          simulacroId: { $in: simulacroIds },
-          score: { $ne: null },
-          status: { $in: ['valid', 'needsReview', 'invalid'] }
-        }
-      },
-      {
-        $group: {
-          _id: '$simulacroId',
-          averageScore: { $avg: '$score' }
-        }
-      }
-    ])
+    prisma.$queryRaw`
+      SELECT
+        "physicalSimulacroId",
+        COUNT(*)::int AS "sheetsReceived",
+        COUNT(*) FILTER (WHERE status = 'needsReview')::int AS "sheetsPendingReview",
+        COUNT(*) FILTER (WHERE status = 'duplicate')::int AS "duplicatesDetected"
+      FROM "PhysicalAnswerSheet"
+      WHERE "physicalSimulacroId" IN (${Prisma.join(simulacroIds)})
+      GROUP BY "physicalSimulacroId"
+    `,
+    prisma.$queryRaw`
+      SELECT "physicalSimulacroId", AVG(score) AS "averageScore"
+      FROM "PhysicalAnswerSheet"
+      WHERE "physicalSimulacroId" IN (${Prisma.join(simulacroIds)})
+        AND score IS NOT NULL
+        AND status IN ('valid', 'needsReview', 'invalid')
+      GROUP BY "physicalSimulacroId"
+    `
   ]);
 
-  const sheetMap = new Map(sheetStats.map((row) => [String(row._id), row]));
-  const scoreMap = new Map(scoreStats.map((row) => [String(row._id), row]));
+  const sheetMap = new Map(sheetStats.map((row) => [String(row.physicalSimulacroId), row]));
+  const scoreMap = new Map(scoreStats.map((row) => [String(row.physicalSimulacroId), row]));
 
   const expectedMap = new Map();
   await Promise.all(
-    Array.from(courseIdsBySimulacro.entries()).map(async ([simulacroId, courseIds]) => {
-      expectedMap.set(simulacroId, await computeExpectedStudents(courseIds));
+    simulacroIds.map(async (id) => {
+      expectedMap.set(String(id), await computeExpectedStudents(String(id)));
     })
   );
 
@@ -188,102 +196,89 @@ const buildTeacherSimulacroStats = async (simulacroIds, courseIdsBySimulacro) =>
 const listTeacherOcrSimulacros = async ({ user, query }) => {
   const { page, limit, skip } = parsePagination(query);
 
-  const where = { teacher: user.id };
+  const where = { teacherId: user.id };
   if (query.status) where.status = query.status;
 
   const [total, items] = await Promise.all([
-    PhysicalSimulacro.countDocuments(where),
-    PhysicalSimulacro.find(where)
-      .select('title date status courses reviewDeadline')
-      .populate('courses', 'name')
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
+    prisma.physicalSimulacro.count({ where }),
+    prisma.physicalSimulacro.findMany({
+      where,
+      select: {
+        id: true, title: true, date: true, status: true, reviewDeadline: true,
+        courses: { select: { id: true, name: true } }
+      },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      skip,
+      take: limit
+    })
   ]);
 
-  const simulacroIds = items.map((item) => item._id);
-  const courseIdsBySimulacro = new Map(
-    items.map((item) => [String(item._id), (item.courses || []).map((course) => course._id)])
-  );
-
-  const { sheetMap, scoreMap, expectedMap } = await buildTeacherSimulacroStats(simulacroIds, courseIdsBySimulacro);
+  const simulacroIds = items.map((item) => item.id);
+  const { sheetMap, scoreMap, expectedMap } = await buildTeacherSimulacroStats(simulacroIds);
 
   const rows = items.map((item) => {
-    const key = String(item._id);
+    const key = item.id;
     const sheets = sheetMap.get(key) || {};
     const score = scoreMap.get(key) || {};
 
     return {
-      id: item._id,
+      id: item.id,
       title: item.title,
       date: item.date,
       status: item.status,
-      courseName: (item.courses || []).map((course) => course.name).join(', '),
+      courseName: (item.courses || []).map((c) => c.name).join(', '),
       expectedStudents: expectedMap.get(key) || 0,
-      sheetsReceived: sheets.sheetsReceived || 0,
-      sheetsPendingReview: sheets.sheetsPendingReview || 0,
-      duplicatesDetected: sheets.duplicatesDetected || 0,
+      sheetsReceived: Number(sheets.sheetsReceived || 0),
+      sheetsPendingReview: Number(sheets.sheetsPendingReview || 0),
+      duplicatesDetected: Number(sheets.duplicatesDetected || 0),
       averageScore: Number((score.averageScore || 0).toFixed(2))
     };
   });
 
-  return {
-    items: rows,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit)
-    }
-  };
+  return { items: rows, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
 };
 
 const getTeacherOcrSimulacroDetail = async ({ user, simulacroId }) => {
   const simulacro = await ensureTeacherAccess({ simulacroId, user });
 
-  const [sheets, expectedStudents, courses] = await Promise.all([
-    PhysicalAnswerSheet.find({ simulacroId: simulacro._id })
-      .select('studentId qrToken score theta status errors parsedAnswers rawFilePath manualCorrections processedAt')
-      .populate('studentId', 'name email')
-      .sort({ createdAt: -1 })
-      .lean(),
-    computeExpectedStudents(simulacro.courses),
-    Course.find({ _id: { $in: simulacro.courses } }).select('name').lean()
+  const [sheets, expectedStudents] = await Promise.all([
+    prisma.physicalAnswerSheet.findMany({
+      where: { physicalSimulacroId: simulacro.id },
+      include: { student: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: 'desc' }
+    }),
+    computeExpectedStudents(simulacro.id)
   ]);
 
   const summary = {
-    id: simulacro._id,
+    id: simulacro.id,
     title: simulacro.title,
     date: simulacro.date,
     status: simulacro.status,
-    course: courses.map((course) => course.name).join(', '),
+    course: (simulacro.courses || []).map((c) => c.name).join(', '),
     studentsExpected: expectedStudents,
     sheetsReceived: sheets.length,
-    sheetsWithErrors: sheets.filter((sheet) => (sheet.errors || []).length > 0 || sheet.status === 'needsReview').length
+    sheetsWithErrors: sheets.filter((s) => ((s.errors || []).length > 0) || s.status === 'needsReview').length
   };
 
   const mappedSheets = sheets.map((sheet) => ({
-    id: sheet._id,
-    studentId: sheet.studentId?._id,
-    studentName: sheet.studentId?.name || 'Unknown',
-    studentEmail: sheet.studentId?.email || '',
+    id: sheet.id,
+    studentId: sheet.studentId,
+    studentName: sheet.student?.name || 'Unknown',
+    studentEmail: sheet.student?.email || '',
     qrToken: sheet.qrToken,
     status: sheet.status,
     score: sheet.score,
     theta: sheet.theta,
-    validAnswers: (sheet.parsedAnswers || []).filter((row) => row.markedOption).length,
-    errors: (sheet.errors || []).length,
+    validAnswers: ((sheet.parsedAnswers || []).filter((row) => row.markedOption)).length,
+    errors: ((sheet.errors || []).length),
     parsedResponses: sheet.parsedAnswers,
     manualCorrections: sheet.manualCorrections,
     processedAt: sheet.processedAt,
     previewUrl: sheet.rawFilePath ? `/${String(sheet.rawFilePath).replace(/^\/+/, '')}` : null
   }));
 
-  return {
-    summary,
-    sheets: mappedSheets
-  };
+  return { summary, sheets: mappedSheets };
 };
 
 const extractStudentIdFromQr = (qr) => {
@@ -291,20 +286,11 @@ const extractStudentIdFromQr = (qr) => {
   return qr.studentId || qr.studentID || null;
 };
 
-const ensureSimulacroIdMatch = ({ qr, simulacro }) => {
-  const qrSimulacroId = qr?.simulacroId || qr?.simulacroPhysicalID || qr?.simulacroPhysicalId || null;
-  if (!qrSimulacroId) return false;
-
-  return String(qrSimulacroId) === String(simulacro._id) || String(qrSimulacroId) === String(simulacro.id || '');
-};
-
 const ensureSafePathForDelete = async (rawFilePath) => {
   if (!rawFilePath) return;
-
   const absolute = path.resolve(path.join(process.cwd(), rawFilePath.replace(/^\/+/, '')));
   const base = path.resolve(path.join(process.cwd(), 'uploads', 'physical-simulacros'));
   if (!absolute.startsWith(base)) return;
-
   try {
     await fs.unlink(absolute);
   } catch (_error) {
@@ -312,114 +298,131 @@ const ensureSafePathForDelete = async (rawFilePath) => {
   }
 };
 
-const processUploadedFileJob = async ({
-  user,
-  simulacro,
-  file,
-  pagePayloads,
-  thetaCalculator
-}) => {
-  const parsed = await parsePDF(file.path, {
-    pagePayloads,
-    totalQuestions: simulacro.totalQuestions
-  });
+const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, thetaCalculator }) => {
+  let resolvedPayloads = pagePayloads;
+  if (!Array.isArray(resolvedPayloads) || resolvedPayloads.length === 0) {
+    const { generatePagePayloads } = require('./bubbleDetectionService');
+    resolvedPayloads = await generatePagePayloads(file.path, { totalQuestions: simulacro.totalQuestions });
+  }
+  const parsed = await parsePDF(file.path, { pagePayloads: resolvedPayloads, totalQuestions: simulacro.totalQuestions });
 
   for (const page of parsed.pages) {
     const qrToken = String(page.qrToken || '').trim();
     const qr = page.qr;
 
     if (!qrToken) {
-      await PhysicalAnswerSheet.create({
-        simulacroId: simulacro._id,
-        studentId: user.id,
-        qrToken: `missing-qr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
-        parsedAnswers: [],
-        status: 'invalid',
-        errors: [{ type: 'MISSING_QR', message: 'QR not detected' }],
-        processedAt: new Date()
+      await prisma.physicalAnswerSheet.create({
+        data: {
+          physicalSimulacroId: simulacro.id,
+          studentId: user.id,
+          qrToken: `missing-qr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          parsedAnswers: [],
+          status: 'invalid',
+          errors: [{ type: 'MISSING_QR', message: 'QR not detected' }],
+          processedAt: new Date()
+        }
       });
       continue;
     }
 
-    const existingByQr = await PhysicalAnswerSheet.findOne({ simulacroId: simulacro._id, qrToken }).lean();
+    const existingByQr = await prisma.physicalAnswerSheet.findUnique({
+      where: { physicalSimulacroId_qrToken: { physicalSimulacroId: simulacro.id, qrToken } }
+    });
+
     if (existingByQr) {
-      await PhysicalAnswerSheet.findByIdAndUpdate(existingByQr._id, {
-        $set: { status: 'duplicate' },
-        $push: { errors: { type: 'DUPLICATE_QR', message: 'Duplicate QR upload detected' } }
+      const existingErrors = Array.isArray(existingByQr.errors) ? existingByQr.errors : [];
+      await prisma.physicalAnswerSheet.update({
+        where: { id: existingByQr.id },
+        data: {
+          status: 'duplicate',
+          errors: [...existingErrors, { type: 'DUPLICATE_QR', message: 'Duplicate QR upload detected' }]
+        }
       });
-
       continue;
     }
 
-    const extractedStudentId = extractStudentIdFromQr(qr);
+    const extractedStudentUserId = extractStudentIdFromQr(qr);
 
-    if (!extractedStudentId || !isObjectId(extractedStudentId)) {
-      await PhysicalAnswerSheet.create({
-        simulacroId: simulacro._id,
-        studentId: user.id,
-        qrToken,
-        rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
-        parsedAnswers: [],
-        status: 'invalid',
-        errors: [{ type: 'MISSING_STUDENT', message: 'Student not found in QR token' }],
-        processedAt: new Date()
+    if (!extractedStudentUserId) {
+      await prisma.physicalAnswerSheet.create({
+        data: {
+          physicalSimulacroId: simulacro.id,
+          studentId: user.id,
+          qrToken,
+          rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          parsedAnswers: [],
+          status: 'invalid',
+          errors: [{ type: 'MISSING_STUDENT', message: 'Student not found in QR token' }],
+          processedAt: new Date()
+        }
+      });
+      continue;
+    }
+
+    // Verify student exists as a User
+    const studentUser = await prisma.user.findUnique({ where: { id: extractedStudentUserId }, select: { id: true } });
+    if (!studentUser) {
+      await prisma.physicalAnswerSheet.create({
+        data: {
+          physicalSimulacroId: simulacro.id,
+          studentId: user.id,
+          qrToken,
+          rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          parsedAnswers: [],
+          status: 'invalid',
+          errors: [{ type: 'MISSING_STUDENT', message: 'Student user not found' }],
+          processedAt: new Date()
+        }
       });
       continue;
     }
 
     const studentCourse = await ensureStudentInSimulacroCourses({
-      studentId: extractedStudentId,
-      simulacro
+      studentUserId: extractedStudentUserId,
+      simulacroId: simulacro.id
     });
 
     if (!studentCourse) {
-      await PhysicalAnswerSheet.create({
-        simulacroId: simulacro._id,
-        studentId: extractedStudentId,
-        qrToken,
-        rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
-        parsedAnswers: [],
-        status: 'invalid',
-        errors: [{ type: 'STUDENT_NOT_IN_COURSE', message: 'Student does not belong to assigned courses' }],
-        processedAt: new Date()
+      await prisma.physicalAnswerSheet.create({
+        data: {
+          physicalSimulacroId: simulacro.id,
+          studentId: extractedStudentUserId,
+          qrToken,
+          rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          parsedAnswers: [],
+          status: 'invalid',
+          errors: [{ type: 'STUDENT_NOT_IN_COURSE', message: 'Student does not belong to assigned courses' }],
+          processedAt: new Date()
+        }
       });
       continue;
     }
 
-    const evaluated = evaluateAnswerSheet({
-      sheet: page,
-      answerKey: simulacro.answerKey,
-      thetaCalculator
-    });
+    const evaluated = evaluateAnswerSheet({ sheet: page, answerKey: simulacro.answerKey, thetaCalculator });
+    const modelStatus = page.flags?.includes('LOW_CONFIDENCE') ? 'needsReview' : evaluated.status;
 
-    const modelStatus = page.flags?.includes('LOW_CONFIDENCE')
-      ? 'needsReview'
-      : evaluated.status;
-
-    await PhysicalAnswerSheet.create({
-      simulacroId: simulacro._id,
-      studentId: extractedStudentId,
-      qrToken,
-      rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
-      parsedAnswers: evaluated.parsedAnswers,
-      score: evaluated.rawScore,
-      theta: evaluated.theta,
-      status: modelStatus,
-      errors: [
-        ...(evaluated.errors || []),
-        ...(page.flags || []).map((flag) => ({ type: flag, message: `OMR flag: ${flag}` }))
-      ],
-      detectionConfidence: page.detectionConfidence,
-      processedAt: new Date()
+    await prisma.physicalAnswerSheet.create({
+      data: {
+        physicalSimulacroId: simulacro.id,
+        studentId: extractedStudentUserId,
+        qrToken,
+        rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+        parsedAnswers: evaluated.parsedAnswers,
+        score: evaluated.rawScore,
+        theta: evaluated.theta,
+        status: modelStatus,
+        errors: [
+          ...(evaluated.errors || []),
+          ...(page.flags || []).map((flag) => ({ type: flag, message: `OMR flag: ${flag}` }))
+        ],
+        detectionConfidence: page.detectionConfidence,
+        processedAt: new Date()
+      }
     });
   }
 
-  await PhysicalSimulacro.findByIdAndUpdate(simulacro._id, {
-    $set: {
-      status: 'reviewing'
-    }
-  });
+  await prisma.physicalSimulacro.update({ where: { id: simulacro.id }, data: { status: 'reviewing' } });
 };
 
 const uploadTeacherOcrSheets = async ({ user, simulacroId, files, pagePayloadsByFileName }) => {
@@ -435,57 +438,31 @@ const uploadTeacherOcrSheets = async ({ user, simulacroId, files, pagePayloadsBy
 
   const thetaCalculator = buildThetaCalculator(simulacro.answerKey);
 
-  await PhysicalSimulacro.findByIdAndUpdate(simulacro._id, { $set: { status: 'processing' } });
+  await prisma.physicalSimulacro.update({ where: { id: simulacro.id }, data: { status: 'processing' } });
 
   const jobs = files.map((file) => {
     const fileName = path.basename(file.originalname || file.filename);
     const pagePayloads = pagePayloadsByFileName?.[fileName] || pagePayloadsByFileName?.default || null;
-
     const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     ocrQueue
       .enqueue(() => processUploadedFileJob({ user, simulacro, file, pagePayloads, thetaCalculator }))
       .then(async () => {
-        await logAudit({
-          userId: user.id,
-          action: 'upload',
-          entityType: 'PhysicalSimulacro',
-          entityId: simulacro._id,
-          metadata: { fileName, jobId }
-        });
+        await logAudit({ schoolId: simulacro.schoolId, userId: user.id, action: 'upload', entityType: 'PhysicalSimulacro', entityId: simulacro.id, metadata: { fileName, jobId } });
       })
       .catch(async (error) => {
-        await logAudit({
-          userId: user.id,
-          action: 'upload_failed',
-          entityType: 'PhysicalSimulacro',
-          entityId: simulacro._id,
-          metadata: { fileName, jobId, error: error.message }
-        });
+        await logAudit({ schoolId: simulacro.schoolId, userId: user.id, action: 'upload_failed', entityType: 'PhysicalSimulacro', entityId: simulacro.id, metadata: { fileName, jobId, error: error.message } });
       });
 
-    return {
-      jobId,
-      fileName,
-      status: 'queued'
-    };
+    return { jobId, fileName, status: 'queued' };
   });
 
-  return {
-    queuedJobs: jobs,
-    totalQueued: jobs.length
-  };
+  return { queuedJobs: jobs, totalQueued: jobs.length };
 };
 
 const recalculateSheetScore = ({ simulacro, sheet }) => {
   const thetaCalculator = buildThetaCalculator(simulacro.answerKey);
-  return evaluateAnswerSheet({
-    sheet: {
-      answers: sheet.parsedAnswers
-    },
-    answerKey: simulacro.answerKey,
-    thetaCalculator
-  });
+  return evaluateAnswerSheet({ sheet: { answers: sheet.parsedAnswers }, answerKey: simulacro.answerKey, thetaCalculator });
 };
 
 const reviewTeacherOcrSheet = async ({ user, simulacroId, payload }) => {
@@ -495,55 +472,51 @@ const reviewTeacherOcrSheet = async ({ user, simulacroId, payload }) => {
   const simulacro = await ensureTeacherAccess({ simulacroId, user });
   const { sheetId, corrections } = validation.value;
 
-  const sheet = await PhysicalAnswerSheet.findOne({ _id: sheetId, simulacroId: simulacro._id });
+  const sheet = await prisma.physicalAnswerSheet.findFirst({
+    where: { id: sheetId, physicalSimulacroId: simulacro.id }
+  });
   if (!sheet) throw new ApiError(404, 'NotFound', ['Sheet not found']);
 
-  const answerMap = new Map((sheet.parsedAnswers || []).map((row) => [Number(row.questionNumber), row]));
+  const answerMap = new Map(
+    ((sheet.parsedAnswers || [])).map((row) => [Number(row.questionNumber), row])
+  );
 
   corrections.forEach((correction) => {
     const current = answerMap.get(correction.questionNumber) || { questionNumber: correction.questionNumber, confidence: 1 };
-    answerMap.set(correction.questionNumber, {
-      ...current,
-      markedOption: correction.correctedOption,
-      confidence: 1
-    });
+    answerMap.set(correction.questionNumber, { ...current, markedOption: correction.correctedOption, confidence: 1 });
   });
 
-  sheet.parsedAnswers = Array.from(answerMap.values()).sort((a, b) => a.questionNumber - b.questionNumber);
-  sheet.manualCorrections = [...(sheet.manualCorrections || []), ...corrections];
+  const updatedParsedAnswers = Array.from(answerMap.values()).sort((a, b) => a.questionNumber - b.questionNumber);
+  const updatedManualCorrections = [...(Array.isArray(sheet.manualCorrections) ? sheet.manualCorrections : []), ...corrections];
 
-  const recalculated = recalculateSheetScore({ simulacro, sheet });
-  sheet.score = recalculated.rawScore;
-  sheet.theta = recalculated.theta;
-  sheet.errors = [];
-  sheet.status = 'valid';
-  sheet.processedAt = new Date();
+  const mockSheet = { parsedAnswers: updatedParsedAnswers };
+  const recalculated = recalculateSheetScore({ simulacro, sheet: mockSheet });
 
-  await sheet.save();
-
-  await logAudit({
-    userId: user.id,
-    action: 'manualCorrection',
-    entityType: 'PhysicalAnswerSheet',
-    entityId: sheet._id,
-    metadata: { simulacroId: simulacro._id, corrections }
+  const updated = await prisma.physicalAnswerSheet.update({
+    where: { id: sheet.id },
+    data: {
+      parsedAnswers: updatedParsedAnswers,
+      manualCorrections: updatedManualCorrections,
+      score: recalculated.rawScore,
+      theta: recalculated.theta,
+      errors: [],
+      status: 'valid',
+      processedAt: new Date()
+    }
   });
 
-  await logAudit({
-    userId: user.id,
-    action: 'review',
-    entityType: 'PhysicalSimulacro',
-    entityId: simulacro._id,
-    metadata: { sheetId: sheet._id, correctionsCount: corrections.length }
-  });
+  await Promise.all([
+    logAudit({ schoolId: simulacro.schoolId, userId: user.id, action: 'manualCorrection', entityType: 'PhysicalAnswerSheet', entityId: sheet.id, metadata: { simulacroId: simulacro.id, corrections } }),
+    logAudit({ schoolId: simulacro.schoolId, userId: user.id, action: 'review', entityType: 'PhysicalSimulacro', entityId: simulacro.id, metadata: { sheetId: sheet.id, correctionsCount: corrections.length } })
+  ]);
 
-  return sheet.toObject();
+  return updated;
 };
 
 const buildEvaluationFromSheet = ({ simulacro, sheet }) => {
   const keyMap = new Map((simulacro.answerKey || []).map((row) => [row.questionNumber, row.correctOption]));
 
-  const responses = (sheet.parsedAnswers || []).map((row) => {
+  const responses = ((sheet.parsedAnswers || [])).map((row) => {
     const correctAnswer = keyMap.get(row.questionNumber) || null;
     const selected = row.markedOption || null;
     return {
@@ -555,116 +528,125 @@ const buildEvaluationFromSheet = ({ simulacro, sheet }) => {
   });
 
   const theta = Number(sheet.theta || 0);
-  const globalScore = Number((sheet.score || 0) * (500 / Math.max(simulacro.totalQuestions, 1))).toFixed(0);
+  const globalScore = Number((Number(sheet.score || 0) * (500 / Math.max(simulacro.totalQuestions, 1))).toFixed(0));
   const percentile = Math.max(1, Math.min(99, Math.round(((theta + 3) / 6) * 100)));
 
-  return {
-    responses,
-    theta,
-    globalScore: Number(globalScore),
-    percentile
-  };
+  return { responses, theta, globalScore, percentile };
 };
 
 const publishTeacherOcrResults = async ({ user, simulacroId }) => {
   const simulacro = await ensureTeacherAccess({ simulacroId, user });
 
-  const pendingCount = await PhysicalAnswerSheet.countDocuments({
-    simulacroId: simulacro._id,
-    status: 'needsReview'
+  const pendingCount = await prisma.physicalAnswerSheet.count({
+    where: { physicalSimulacroId: simulacro.id, status: 'needsReview' }
   });
-
   if (pendingCount > 0) {
     throw new ApiError(400, 'ValidationError', ['Cannot publish with pending reviews']);
   }
 
-  const sheets = await PhysicalAnswerSheet.find({
-    simulacroId: simulacro._id,
-    status: { $in: ['valid', 'invalid'] }
-  })
-    .select('studentId parsedAnswers score theta rawFilePath status')
-    .lean();
+  const sheets = await prisma.physicalAnswerSheet.findMany({
+    where: { physicalSimulacroId: simulacro.id, status: { in: ['valid', 'invalid'] } },
+    select: { id: true, studentId: true, parsedAnswers: true, score: true, theta: true, rawFilePath: true, status: true }
+  });
 
   for (const sheet of sheets) {
     const evaluationData = buildEvaluationFromSheet({ simulacro, sheet });
 
-    await Evaluation.findOneAndUpdate(
-      {
-        student: sheet.studentId,
-        physicalSimulacro: simulacro._id,
-        evaluationType: 'physical'
-      },
-      {
-        $set: {
-          student: sheet.studentId,
-          physicalSimulacro: simulacro._id,
+    // Upsert-like: find existing evaluation then create or update
+    const existingEval = await prisma.evaluation.findFirst({
+      where: { studentId: sheet.studentId, physicalSimulacroId: simulacro.id, evaluationType: 'physical' }
+    });
+
+    if (existingEval) {
+      await prisma.evaluationResponse.deleteMany({ where: { evaluationId: existingEval.id } });
+      await prisma.evaluation.update({
+        where: { id: existingEval.id },
+        data: {
+          status: 'completed',
+          theta: evaluationData.theta,
+          globalScore: evaluationData.globalScore,
+          percentile: evaluationData.percentile,
+          physicalRawScore: Number(sheet.score || 0),
+          physicalPercentCorrect: Number(((Number(sheet.score || 0) / Math.max(simulacro.totalQuestions, 1)) * 100).toFixed(2)),
+          physicalCompetencyBreakdown: [],
+          physicalScannedSheetPath: sheet.rawFilePath || '',
+          completedAt: new Date(),
+          responses: { create: evaluationData.responses.map((r) => ({ ...r, questionId: r.questionId || 'unknown' })) }
+        }
+      });
+    } else {
+      await prisma.evaluation.create({
+        data: {
+          studentId: sheet.studentId,
+          physicalSimulacroId: simulacro.id,
           evaluationType: 'physical',
           status: 'completed',
           theta: evaluationData.theta,
           globalScore: evaluationData.globalScore,
           percentile: evaluationData.percentile,
-          responses: evaluationData.responses,
-          completedAt: new Date(),
-          physicalMeta: {
-            rawScore: Number(sheet.score || 0),
-            percentCorrect: Number(((Number(sheet.score || 0) / Math.max(simulacro.totalQuestions, 1)) * 100).toFixed(2)),
-            competencyBreakdown: [],
-            scannedSheetPath: sheet.rawFilePath || ''
-          }
-        },
-        $setOnInsert: {
+          physicalRawScore: Number(sheet.score || 0),
+          physicalPercentCorrect: Number(((Number(sheet.score || 0) / Math.max(simulacro.totalQuestions, 1)) * 100).toFixed(2)),
+          physicalCompetencyBreakdown: [],
+          physicalScannedSheetPath: sheet.rawFilePath || '',
           startedAt: new Date(),
-          booklet: null
+          completedAt: new Date()
         }
-      },
-      { upsert: true }
-    );
+      });
+    }
 
-    await StudentProgress.findOneAndUpdate(
-      { student: sheet.studentId },
-      {
-        $set: { currentTheta: evaluationData.theta, percentile: evaluationData.percentile, ultimoSimulacro: new Date() },
-        $inc: { simulacrosCompletados: 1 },
-        $push: {
-          historialTheta: {
-            date: new Date(),
-            theta: evaluationData.theta,
-            globalScore: evaluationData.globalScore
-          }
-        }
+    // Upsert StudentProgress + create ThetaHistory entry
+    const progress = await prisma.studentProgress.upsert({
+      where: { studentId: sheet.studentId },
+      create: {
+        studentId: sheet.studentId,
+        schoolId: simulacro.schoolId,
+        currentTheta: evaluationData.theta,
+        percentile: evaluationData.percentile,
+        ultimoSimulacro: new Date(),
+        simulacrosCompletados: 1
       },
-      { upsert: true }
-    );
+      update: {
+        currentTheta: evaluationData.theta,
+        percentile: evaluationData.percentile,
+        ultimoSimulacro: new Date(),
+        simulacrosCompletados: { increment: 1 }
+      }
+    });
+
+    await prisma.thetaHistory.create({
+      data: {
+        progressId: progress.id,
+        theta: evaluationData.theta,
+        globalScore: evaluationData.globalScore
+      }
+    });
   }
 
-  await PhysicalSimulacro.findByIdAndUpdate(simulacro._id, {
-    $set: {
-      status: 'published',
-      publishedAt: new Date()
-    }
+  await prisma.physicalSimulacro.update({
+    where: { id: simulacro.id },
+    data: { status: 'published', publishedAt: new Date() }
   });
 
   await logAudit({
+    schoolId: simulacro.schoolId,
     userId: user.id,
     action: 'publish',
     entityType: 'PhysicalSimulacro',
-    entityId: simulacro._id,
+    entityId: simulacro.id,
     metadata: { totalSheets: sheets.length }
   });
 
-  return {
-    publishedSheets: sheets.length,
-    pendingReviews: 0
-  };
+  return { publishedSheets: sheets.length, pendingReviews: 0 };
 };
 
 const archiveTeacherOcrSimulacro = async ({ user, simulacroId }) => {
   const simulacro = await ensureTeacherAccess({ simulacroId, user });
 
   const threshold = new Date(Date.now() - FILE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  const sheets = await PhysicalAnswerSheet.find({ simulacroId: simulacro._id })
-    .select('_id rawFilePath createdAt')
-    .lean();
+  const sheets = await prisma.physicalAnswerSheet.findMany({
+    where: { physicalSimulacroId: simulacro.id },
+    select: { id: true, rawFilePath: true, createdAt: true }
+  });
 
   let deletedFiles = 0;
 
@@ -672,33 +654,25 @@ const archiveTeacherOcrSimulacro = async ({ user, simulacroId }) => {
     if (sheet.rawFilePath && new Date(sheet.createdAt) <= threshold) {
       await ensureSafePathForDelete(sheet.rawFilePath);
       deletedFiles += 1;
-      await PhysicalAnswerSheet.findByIdAndUpdate(sheet._id, { $set: { rawFilePath: '' } });
+      await prisma.physicalAnswerSheet.update({ where: { id: sheet.id }, data: { rawFilePath: '' } });
     }
   }
 
-  await PhysicalSimulacro.findByIdAndUpdate(simulacro._id, {
-    $set: {
-      status: 'archived',
-      archivedAt: new Date()
-    }
+  await prisma.physicalSimulacro.update({
+    where: { id: simulacro.id },
+    data: { status: 'archived', archivedAt: new Date() }
   });
 
   await logAudit({
+    schoolId: simulacro.schoolId,
     userId: user.id,
     action: 'archive',
     entityType: 'PhysicalSimulacro',
-    entityId: simulacro._id,
-    metadata: {
-      retentionDays: FILE_RETENTION_DAYS,
-      deletedFiles
-    }
+    entityId: simulacro.id,
+    metadata: { retentionDays: FILE_RETENTION_DAYS, deletedFiles }
   });
 
-  return {
-    archivedAt: new Date(),
-    deletedFiles,
-    retentionDays: FILE_RETENTION_DAYS
-  };
+  return { archivedAt: new Date(), deletedFiles, retentionDays: FILE_RETENTION_DAYS };
 };
 
 module.exports = {

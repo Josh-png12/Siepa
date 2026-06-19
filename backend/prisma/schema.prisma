@@ -1,0 +1,1075 @@
+// Prisma schema — SIEPA multi-tenant SaaS
+// PostgreSQL + Prisma Client
+// Migration: MongoDB → PostgreSQL (clean slate, no data migration)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  estudiante
+  docente
+  admin
+  padre
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum DocumentType {
+  CC
+  TI
+  CE
+  PASAPORTE
+}
+
+enum CourseStatus {
+  active
+  inactive
+}
+
+enum QuestionVisibility {
+  private
+  institutional
+  national
+}
+
+enum CalibrationStatus {
+  experimental
+  calibrated
+}
+
+enum QuestionState {
+  borrador
+  publicada
+}
+
+enum NivelCognitivo {
+  recordar
+  comprender
+  aplicar
+  analizar
+  evaluar
+  crear
+}
+
+enum DificultadCualitativa {
+  baja
+  media
+  alta
+}
+
+enum SimulacroState {
+  borrador
+  publicado
+  cerrado
+}
+
+enum SimulacroResultStatus {
+  in_progress
+  submitted
+}
+
+enum PhysicalSimulacroStatus {
+  draft
+  answerKeyPending
+  readyForUpload
+  processing
+  reviewing
+  published
+  archived
+}
+
+enum PhysicalAnswerSheetStatus {
+  valid
+  needsReview
+  invalid
+  duplicate
+}
+
+enum PhysicalSheetStatus {
+  uploaded
+  processing
+  processed
+  needs_review
+  confirmed
+  rejected
+}
+
+enum EvaluationType {
+  virtual
+  physical
+}
+
+enum EvaluationStatus {
+  in_progress
+  completed
+  paused
+}
+
+enum PdfImportJobStatus {
+  draft
+  uploaded
+  extracting
+  parsing
+  previewReady
+  confirmed
+  failed
+}
+
+enum PdfImportBatchStatus {
+  preview
+  imported
+  failed
+}
+
+enum QuestionChangeType {
+  create
+  update
+  publish
+  restore
+  import
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MULTI-TENANT ROOT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// School is the tenant root. Every record belongs to exactly one School.
+// The `slug` field maps to the legacy `institutionId` string used throughout
+// the old Mongo code — useful during the query rewrite transition.
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique // maps to legacy institutionId (e.g. 'default')
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  courses            Course[]
+  questions          Question[]
+  caseGroups         CaseGroup[]
+  simulacros         Simulacro[]
+  physicalSimulacros PhysicalSimulacro[]
+  physicalTemplates  PhysicalTemplate[]
+  physicalSheets     PhysicalSheet[]
+  courseMaterials    CourseMaterial[]
+  booklets           Booklet[]
+  pdfImportJobs      PdfImportJob[]
+  pdfImportBatches   PdfImportBatch[]
+  auditLogs          AuditLog[]
+  metrics            InstitutionMetrics[]
+  systemConfig       SystemConfig?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Central user model. Roles: estudiante, docente, admin, padre.
+// email is globally unique — one account per person across the platform.
+// A user always belongs to exactly one School (tenant).
+// PENDING DECISION: if the same person teaches at two schools, they need two accounts.
+model User {
+  id             String        @id @default(cuid())
+  schoolId       String
+  school         School        @relation(fields: [schoolId], references: [id])
+  name           String
+  email          String
+  password       String
+  role           Role
+  status         UserStatus    @default(active)
+  deletedAt      DateTime?
+  documentType   DocumentType?
+  documentNumber String?
+  grade          String?
+  currentTheta   Float         @default(0)
+  lastActivity   DateTime      @default(now())
+  // Per-user feature flags (override school-level config)
+  featurePhysicalSimulacros Boolean @default(false)
+  featureOcrEnabled         Boolean @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Profile & progress
+  studentProfile Student?
+  progress       StudentProgress?
+
+  // Teaching
+  taughtCourses      Course[]            @relation("CourseTeacher")
+  teacherAssignments TeacherAssignment[]
+
+  // Parent portal
+  parentLinks ParentStudent[] @relation("ParentUser")
+
+  // Question bank authorship
+  createdQuestions Question[]       @relation("QuestionCreatedBy")
+  updatedQuestions Question[]       @relation("QuestionUpdatedBy")
+  questionVersions QuestionVersion[]
+
+  // Simulacros
+  createdSimulacros Simulacro[]     @relation("SimulacroCreatedBy")
+  updatedSimulacros Simulacro[]     @relation("SimulacroUpdatedBy")
+  simulacroResults  SimulacroResult[]
+
+  // Physical simulacros & OCR
+  managedPhysicalSimulacros PhysicalSimulacro[] @relation("PhysicalSimulacroTeacher")
+  physicalAnswerSheets      PhysicalAnswerSheet[]
+  physicalSheetsAsStudent   PhysicalSheet[]     @relation("PhysicalSheetStudent")
+  physicalSheetsCreated     PhysicalSheet[]     @relation("PhysicalSheetCreatedBy")
+  physicalSheetsConfirmed   PhysicalSheet[]     @relation("PhysicalSheetConfirmedBy")
+
+  // Course materials
+  createdMaterials CourseMaterial[]
+  materialAccesses MaterialAccess[]
+
+  // Booklets & evaluations
+  createdBooklets Booklet[]    @relation("BookletCreatedBy")
+  evaluations     Evaluation[]
+  responses       Response[]
+
+  // Case groups
+  createdCaseGroups CaseGroup[] @relation("CaseGroupCreatedBy")
+  updatedCaseGroups CaseGroup[] @relation("CaseGroupUpdatedBy")
+
+  // Misc
+  physicalTemplates PhysicalTemplate[]
+  pdfImportJobs     PdfImportJob[]
+  pdfImportBatches  PdfImportBatch[]
+  auditLogs         AuditLog[]
+
+  @@unique([email, schoolId])
+  @@index([schoolId, role, status])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model Student {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id])
+  grade                String   @default("11")
+  identificationType   String?
+  identificationNumber String?
+  phone                String?
+  guardianName         String?
+  guardianPhone        String?
+  guardianEmail        String?
+  active               Boolean  @default(true)
+  enrolledAt           DateTime @default(now())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  enrollments CourseEnrollment[]
+  parentLinks ParentStudent[]    @relation("StudentParent")
+
+  @@index([grade])
+}
+
+// Junction table for the padre role: links parent Users to Student records.
+// Empty now; portal functionality will be built later.
+model ParentStudent {
+  id        String   @id @default(cuid())
+  parentId  String
+  parent    User     @relation("ParentUser", fields: [parentId], references: [id])
+  studentId String
+  student   Student  @relation("StudentParent", fields: [studentId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([parentId, studentId])
+  @@index([parentId])
+  @@index([studentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COURSES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Course {
+  id           String       @id @default(cuid())
+  schoolId     String
+  school       School       @relation(fields: [schoolId], references: [id])
+  name         String
+  grade        String
+  year         String
+  teacherId    String
+  teacher      User         @relation("CourseTeacher", fields: [teacherId], references: [id])
+  averageTheta Float        @default(0)
+  status       CourseStatus @default(active)
+  deletedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  enrollments        CourseEnrollment[]
+  teacherAssignments TeacherAssignment[]
+  materials          CourseMaterial[]
+  physicalSimulacros PhysicalSimulacro[] // implicit M:N — Prisma creates join table
+  physicalSheets     PhysicalSheet[]
+  auditLogs          AuditLog[]
+
+  @@unique([schoolId, teacherId, name])
+  @@index([schoolId, status, grade])
+  @@index([teacherId])
+}
+
+// Explicit M:N: Student ↔ Course (includes enrolledAt)
+model CourseEnrollment {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id])
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  enrolledAt DateTime @default(now())
+
+  @@unique([courseId, studentId])
+  @@index([courseId])
+  @@index([studentId])
+}
+
+model TeacherAssignment {
+  id         String   @id @default(cuid())
+  teacherId  String
+  teacher    User     @relation(fields: [teacherId], references: [id])
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id])
+  assignedAt DateTime @default(now())
+
+  @@unique([teacherId, courseId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUESTION BANK
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Shared context/scenario for a group of related questions (e.g. a reading passage)
+model CaseGroup {
+  id            String   @id @default(cuid())
+  schoolId      String
+  school        School   @relation(fields: [schoolId], references: [id])
+  title         String
+  contextText   String?
+  contextLatex  String?
+  contextImages Json? // Array<{ url: string, caption?: string }>
+  createdById   String
+  createdBy     User     @relation("CaseGroupCreatedBy", fields: [createdById], references: [id])
+  updatedById   String?
+  updatedBy     User?    @relation("CaseGroupUpdatedBy", fields: [updatedById], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  questions Question[]
+}
+
+model Question {
+  id                    String                @id @default(cuid())
+  schoolId              String
+  school                School                @relation(fields: [schoolId], references: [id])
+  statementText         String?
+  statementImages       Json? // Array<{ url, caption }>
+  latex                 String?
+  options               Json // Array<{ label: string, text: string, image?: { url, caption } }>
+  correctAnswer         String // 'A'–'H'
+  area                  String
+  competencia           String
+  nivelCognitivo        NivelCognitivo
+  dificultadCualitativa DificultadCualitativa
+  triParamA             Float?
+  triParamB             Float?
+  triParamC             Float?
+  visibility            QuestionVisibility    @default(private)
+  calibrationStatus     CalibrationStatus     @default(experimental)
+  estado                QuestionState         @default(borrador)
+  // Denormalized stats — updated by questionStatsService
+  statsTimesUsed           Int   @default(0)
+  statsCorrectRate         Float?
+  statsDiscriminationIndex Float?
+  statsAvgThetaWrong       Float?
+  caseGroupId   String?
+  caseGroup     CaseGroup?     @relation(fields: [caseGroupId], references: [id])
+  importBatchId String?
+  importBatch   PdfImportBatch? @relation(fields: [importBatchId], references: [id])
+  // Source tracking for PDF-imported questions
+  sourceType        String?
+  sourcePdfId       String?
+  sourceSessionName String?
+  sourcePageStart   Int?
+  sourcePageEnd     Int?
+  sourceBlockLabel  String?
+  currentVersion Int      @default(1)
+  createdById    String
+  createdBy      User     @relation("QuestionCreatedBy", fields: [createdById], references: [id])
+  updatedById    String?
+  updatedBy      User?    @relation("QuestionUpdatedBy", fields: [updatedById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  versions           QuestionVersion[]
+  simulacroQuestions SimulacroQuestion[]
+  answerKeys         PhysicalAnswerKey[]
+  bookletQuestions   BookletQuestion[]
+
+  @@index([schoolId, area, competencia, dificultadCualitativa])
+  @@index([schoolId, area, competencia, createdAt(sort: Desc)])
+  @@index([createdById, visibility, calibrationStatus])
+  @@index([updatedAt(sort: Desc)])
+  @@index([caseGroupId])
+  @@index([importBatchId])
+}
+
+model QuestionVersion {
+  id            String             @id @default(cuid())
+  questionId    String
+  question      Question           @relation(fields: [questionId], references: [id])
+  versionNumber Int
+  snapshot      Json // Complete question document at the time of this version
+  changeType    QuestionChangeType
+  changeReason  String?
+  changedById   String
+  changedBy     User               @relation(fields: [changedById], references: [id])
+  createdAt     DateTime           @default(now())
+
+  @@unique([questionId, versionNumber])
+  @@index([questionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIRTUAL SIMULACROS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Simulacro {
+  id               String         @id @default(cuid())
+  schoolId         String
+  school           School         @relation(fields: [schoolId], references: [id])
+  title            String
+  description      String?
+  globalTimeLimit  Int? // seconds
+  strictMode       Boolean        @default(false)
+  estado           SimulacroState @default(borrador)
+  createdById      String
+  createdBy        User           @relation("SimulacroCreatedBy", fields: [createdById], references: [id])
+  updatedById      String?
+  updatedBy        User?          @relation("SimulacroUpdatedBy", fields: [updatedById], references: [id])
+  fechaPublicacion DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  modules        SimulacroModule[]
+  results        SimulacroResult[]
+  physicalSheets PhysicalSheet[] // OCR sheets submitted for this simulacro
+
+  @@index([schoolId, createdById, estado])
+  @@index([fechaPublicacion])
+}
+
+model SimulacroModule {
+  id          String    @id @default(cuid())
+  simulacroId String
+  simulacro   Simulacro @relation(fields: [simulacroId], references: [id], onDelete: Cascade)
+  name        String
+  timeLimit   Int? // seconds
+  order       Int
+
+  questions SimulacroQuestion[]
+
+  @@index([simulacroId])
+}
+
+// Junction: SimulacroModule ↔ Question.
+// embeddedQuestion is a frozen snapshot of the question at assignment time —
+// if the original Question is edited later, results already recorded stay correct.
+model SimulacroQuestion {
+  id               String          @id @default(cuid())
+  moduleId         String
+  module           SimulacroModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  questionId       String?
+  question         Question?       @relation(fields: [questionId], references: [id])
+  embeddedQuestion Json? // Immutable snapshot (see above)
+  order            Int
+
+  answers SimulacroAnswer[]
+
+  @@index([moduleId])
+  @@index([questionId])
+}
+
+model SimulacroResult {
+  id              String                @id @default(cuid())
+  simulacroId     String
+  simulacro       Simulacro             @relation(fields: [simulacroId], references: [id])
+  studentId       String
+  student         User                  @relation(fields: [studentId], references: [id])
+  schoolId        String // denormalized for direct analytics queries without joins
+  startTime       DateTime?
+  endTime         DateTime?
+  overallTheta    Float?
+  percentile      Float                 @default(50)
+  status          SimulacroResultStatus @default(in_progress)
+  markedForReview Json? // Array<SimulacroQuestion.id>
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  answers      SimulacroAnswer[]
+  moduleTimes  SimulacroModuleTime[]
+  moduleThetas SimulacroModuleTheta[]
+
+  @@index([simulacroId, studentId, createdAt(sort: Desc)])
+  @@index([schoolId, studentId])
+  @@index([status])
+}
+
+model SimulacroAnswer {
+  id                  String            @id @default(cuid())
+  resultId            String
+  result              SimulacroResult   @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  simulacroQuestionId String
+  simulacroQuestion   SimulacroQuestion @relation(fields: [simulacroQuestionId], references: [id])
+  selectedOption      String?
+  isCorrect           Boolean?
+
+  @@index([resultId])
+  @@index([simulacroQuestionId])
+}
+
+model SimulacroModuleTime {
+  id           String          @id @default(cuid())
+  resultId     String
+  result       SimulacroResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  moduleName   String
+  secondsSpent Int
+
+  @@index([resultId])
+}
+
+model SimulacroModuleTheta {
+  id         String          @id @default(cuid())
+  resultId   String
+  result     SimulacroResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  moduleName String
+  theta      Float
+
+  @@index([resultId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STUDENT PROGRESS (TRI / IRT)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One record per student. Split from Mongo's embedded arrays into child tables
+// so analytics queries (percentile distribution, area heatmaps, theta trends)
+// can use SQL GROUP BY / aggregations without JSON parsing.
+model StudentProgress {
+  id                    String    @id @default(cuid())
+  studentId             String    @unique
+  student               User      @relation(fields: [studentId], references: [id])
+  schoolId              String // denormalized for direct analytics queries without joins
+  currentTheta          Float     @default(0)
+  globalScore           Float     @default(0)
+  percentile            Float     @default(50)
+  simulacrosCompletados Int       @default(0)
+  rachaActual           Int       @default(0)
+  ultimoSimulacro       DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  competencies StudentCompetency[]
+  thetaHistory ThetaHistory[]
+  alerts       StudentAlert[]
+
+  @@index([schoolId, currentTheta(sort: Desc)])
+  @@index([schoolId, simulacrosCompletados(sort: Desc)])
+}
+
+model StudentCompetency {
+  id                String          @id @default(cuid())
+  progressId        String
+  progress          StudentProgress @relation(fields: [progressId], references: [id], onDelete: Cascade)
+  area              String
+  theta             Float           @default(0)
+  questionsAnswered Int             @default(0)
+  lastUpdated       DateTime        @default(now())
+
+  @@unique([progressId, area])
+  @@index([progressId])
+  @@index([area, theta(sort: Desc)])
+}
+
+model ThetaHistory {
+  id          String          @id @default(cuid())
+  progressId  String
+  progress    StudentProgress @relation(fields: [progressId], references: [id], onDelete: Cascade)
+  theta       Float
+  globalScore Float
+  recordedAt  DateTime        @default(now())
+
+  @@index([progressId, recordedAt(sort: Desc)])
+}
+
+model StudentAlert {
+  id         String          @id @default(cuid())
+  progressId String
+  progress   StudentProgress @relation(fields: [progressId], references: [id], onDelete: Cascade)
+  tipo       String
+  mensaje    String
+  fecha      DateTime        @default(now())
+  leida      Boolean         @default(false)
+
+  @@index([progressId, leida])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COURSE MATERIALS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CourseMaterial {
+  id          String   @id @default(cuid())
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id])
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id])
+  title       String
+  description String?
+  filePath    String
+  fileType    String
+  area        String?
+  competencia String?
+  thetaTarget Float?
+  isMandatory Boolean  @default(false)
+  tags        String[]
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  accesses MaterialAccess[]
+
+  @@index([courseId, createdAt(sort: Desc)])
+  @@index([courseId, area, competencia])
+}
+
+model MaterialAccess {
+  id         String         @id @default(cuid())
+  materialId String
+  material   CourseMaterial @relation(fields: [materialId], references: [id])
+  studentId  String
+  student    User           @relation(fields: [studentId], references: [id])
+  openedAt   DateTime       @default(now())
+  downloaded Boolean        @default(false)
+  timeSpent  Int            @default(0)
+
+  @@index([materialId, studentId, openedAt(sort: Desc)])
+  @@index([studentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHYSICAL SIMULACROS
+// Note: SimulacroPhysical (legacy model) was discarded — it had no active
+// controllers or routes. All physical exam logic lives here in PhysicalSimulacro.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PhysicalSimulacro {
+  id             String                  @id @default(cuid())
+  schoolId       String
+  school         School                  @relation(fields: [schoolId], references: [id])
+  title          String
+  description    String?
+  teacherId      String
+  teacher        User                    @relation("PhysicalSimulacroTeacher", fields: [teacherId], references: [id])
+  date           DateTime
+  startTime      String?
+  endTime        String?
+  status         PhysicalSimulacroStatus @default(draft)
+  totalQuestions Int
+  reviewDeadline DateTime
+  publishedAt    DateTime?
+  archivedAt     DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  courses      Course[]              // implicit M:N (Prisma auto join table)
+  answerKey    PhysicalAnswerKey[]
+  answerSheets PhysicalAnswerSheet[]
+  evaluations  Evaluation[]
+
+  @@index([schoolId, teacherId, status])
+  @@index([date(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+// Per-question correct answer for a physical simulacro.
+// questionId links to the question bank when available (optional).
+model PhysicalAnswerKey {
+  id                  String            @id @default(cuid())
+  physicalSimulacroId String
+  physicalSimulacro   PhysicalSimulacro @relation(fields: [physicalSimulacroId], references: [id], onDelete: Cascade)
+  questionNumber      Int
+  correctOption       String
+  questionId          String?
+  question            Question?         @relation(fields: [questionId], references: [id])
+
+  @@unique([physicalSimulacroId, questionNumber])
+  @@index([physicalSimulacroId])
+}
+
+// OMR-scanned answer sheet submitted by a student for a PhysicalSimulacro.
+// parsedAnswers and manualCorrections stored as Json because their structure
+// is variable (0–147 questions, confidence scores per bubble, etc.)
+model PhysicalAnswerSheet {
+  id                  String                    @id @default(cuid())
+  physicalSimulacroId String
+  physicalSimulacro   PhysicalSimulacro         @relation(fields: [physicalSimulacroId], references: [id])
+  studentId           String
+  student             User                      @relation(fields: [studentId], references: [id])
+  qrToken             String
+  rawFilePath         String
+  parsedAnswers       Json? // Array<{ questionNumber: number, markedOption: string, confidence: number }>
+  score               Float?
+  theta               Float?
+  status              PhysicalAnswerSheetStatus @default(needsReview)
+  errors              Json? // Array<{ type: string, message: string }>
+  manualCorrections   Json? // Array<{ questionNumber: number, correctedOption: string }>
+  detectionConfidence Float?
+  processedAt         DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@unique([physicalSimulacroId, qrToken])
+  @@index([physicalSimulacroId])
+  @@index([studentId])
+  @@index([status])
+}
+
+// OCR answer sheet for the physical-upload flow of a virtual Simulacro
+// (students submit a scanned paper response to a Simulacro exam).
+model PhysicalSheet {
+  id                 String              @id @default(cuid())
+  schoolId           String
+  school             School              @relation(fields: [schoolId], references: [id])
+  studentId          String
+  student            User                @relation("PhysicalSheetStudent", fields: [studentId], references: [id])
+  courseId           String
+  course             Course              @relation(fields: [courseId], references: [id])
+  simulacroId        String
+  simulacro          Simulacro           @relation(fields: [simulacroId], references: [id])
+  originalName       String?
+  filePath           String
+  fileSize           Int?
+  mimeType           String?
+  rawResponses       String[]
+  confirmedResponses String[]
+  ocrConfidence      Float?
+  ocrErrors          String[]
+  status             PhysicalSheetStatus @default(uploaded)
+  triTheta           Float?
+  triScaledScore     Float?
+  triPercentil       Float?
+  createdById        String
+  createdBy          User                @relation("PhysicalSheetCreatedBy", fields: [createdById], references: [id])
+  confirmedById      String?
+  confirmedBy        User?               @relation("PhysicalSheetConfirmedBy", fields: [confirmedById], references: [id])
+  processedAt        DateTime?
+  confirmedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([studentId, simulacroId])
+  @@index([courseId, status])
+  @@index([createdById, createdAt(sort: Desc)])
+}
+
+// Template PDF + coordinate map used to parse OMR sheets.
+model PhysicalTemplate {
+  id             String   @id @default(cuid())
+  schoolId       String
+  school         School   @relation(fields: [schoolId], references: [id])
+  name           String
+  version        String   @default("v1")
+  pdfBasePath    String
+  coordinateJSON Json? // OMR bubble coordinates parsed from template
+  isActive       Boolean  @default(true)
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([schoolId, isActive, createdAt(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOKLETS, RESPONSES, REPORTS
+// Manual evaluation flow: teacher creates Booklet → student submits Response
+// → system generates Report with score and recommendations.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Booklet {
+  id          String   @id @default(cuid())
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id])
+  title       String
+  duration    Int      @default(60) // minutes
+  createdById String
+  createdBy   User     @relation("BookletCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions   BookletQuestion[]
+  responses   Response[]
+  evaluations Evaluation[]
+}
+
+model BookletQuestion {
+  id         String   @id @default(cuid())
+  bookletId  String
+  booklet    Booklet  @relation(fields: [bookletId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  order      Int
+
+  @@unique([bookletId, questionId])
+  @@index([bookletId])
+}
+
+model Response {
+  id        String    @id @default(cuid())
+  bookletId String
+  booklet   Booklet   @relation(fields: [bookletId], references: [id])
+  studentId String
+  student   User      @relation(fields: [studentId], references: [id])
+  startTime DateTime?
+  endTime   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  answers ResponseAnswer[]
+  report  Report?
+
+  @@index([bookletId])
+  @@index([studentId])
+}
+
+model ResponseAnswer {
+  id             String   @id @default(cuid())
+  responseId     String
+  response       Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  questionId     String
+  selectedOption String?
+
+  @@index([responseId])
+}
+
+model Report {
+  id              String   @id @default(cuid())
+  responseId      String   @unique
+  response        Response @relation(fields: [responseId], references: [id])
+  score           Float?
+  recomendaciones String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  competencies ReportCompetency[]
+}
+
+model ReportCompetency {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  competencia String
+  correct     Int      @default(0)
+  total       Int      @default(0)
+  fortalezas  String[]
+  debilidades String[]
+
+  @@index([reportId])
+}
+
+// Hybrid evaluation record (virtual or physical exam session).
+// PENDING DECISION: the original Evaluation.physicalSimulacro referenced
+// SimulacroPhysical (discarded model). That FK is now mapped to PhysicalSimulacro.
+// Confirm that this is the correct target before running the query rewrite.
+model Evaluation {
+  id                         String            @id @default(cuid())
+  studentId                  String
+  student                    User              @relation(fields: [studentId], references: [id])
+  bookletId                  String?
+  booklet                    Booklet?          @relation(fields: [bookletId], references: [id])
+  physicalSimulacroId        String?
+  physicalSimulacro          PhysicalSimulacro? @relation(fields: [physicalSimulacroId], references: [id])
+  evaluationType             EvaluationType
+  theta                      Float?
+  globalScore                Float?
+  percentile                 Float             @default(50)
+  physicalRawScore           Float?
+  physicalPercentCorrect     Float?
+  physicalCompetencyBreakdown Json?
+  physicalScannedSheetPath   String?
+  status                     EvaluationStatus  @default(in_progress)
+  startedAt                  DateTime?
+  completedAt                DateTime?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+
+  responses EvaluationResponse[]
+
+  @@index([studentId])
+  @@index([evaluationType])
+  @@index([status])
+}
+
+model EvaluationResponse {
+  id             String     @id @default(cuid())
+  evaluationId   String
+  evaluation     Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  questionId     String
+  selectedOption String?
+  status         String?
+  correctAnswer  String?
+  isCorrect      Boolean?
+
+  @@index([evaluationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF IMPORT PIPELINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Document-level state for one PDF import job (OCR pipeline).
+// previewQuestions is Json because it is transitional data — it only lives
+// until the admin confirms the import and real Question records are created.
+model PdfImportJob {
+  id                 String             @id @default(cuid())
+  schoolId           String
+  school             School             @relation(fields: [schoolId], references: [id])
+  createdById        String
+  createdBy          User               @relation(fields: [createdById], references: [id])
+  sourceFilePath     String?
+  sourceOriginalName String?
+  sourceMimeType     String?
+  sourceSize         Int?
+  status             PdfImportJobStatus @default(draft)
+  pages              Int?
+  isScanned          Boolean            @default(false)
+  ocrEngine          String?
+  extractedTextPath  String?
+  parsedJsonPath     String?
+  previewQuestions   Json? // Array<{ qNumber, statement, options, detectedAnswer, ... }> — transitional
+  previewWarnings    Json?
+  previewStats       Json?
+  errors             Json? // Array<{ type, message }>
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  assets PdfImportAsset[]
+
+  @@index([schoolId, createdById, status])
+  @@index([createdAt(sort: Desc)])
+}
+
+model PdfImportAsset {
+  id        String       @id @default(cuid())
+  schoolId  String // stored directly for fast filtering without join through job
+  jobId     String
+  job       PdfImportJob @relation(fields: [jobId], references: [id])
+  filePath  String
+  type      String
+  createdAt DateTime     @default(now())
+
+  @@index([jobId])
+  @@index([schoolId])
+}
+
+// Legacy batch-level import (questions PDF + answers PDF pair).
+// detectedBlocks/detectedQuestions/pages are Json because they are
+// raw OCR parse output — transitional state before Question records exist.
+model PdfImportBatch {
+  id                String               @id @default(cuid())
+  schoolId          String
+  school            School               @relation(fields: [schoolId], references: [id])
+  createdById       String
+  createdBy         User                 @relation(fields: [createdById], references: [id])
+  sessionName       String?
+  grade             String?
+  year              String?
+  questionsPdfPath  String?
+  answersPdfPath    String?
+  status            PdfImportBatchStatus @default(preview)
+  detectedBlocks    Json? // Array<{ label, areaGuess, pages, confidence }> — transitional
+  detectedQuestions Json? // Array<{ number, text, page, ... }> — transitional
+  pages             Json? // Array<{ pageNumber, text }> — transitional
+  ocrUsed           Boolean              @default(false)
+  stats             Json?
+  warnings          Json?
+  errorMessage      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  questions Question[] // Questions created from this batch
+
+  @@index([schoolId, createdById, createdAt(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT & METRICS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  schoolId   String
+  school     School   @relation(fields: [schoolId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  courseId   String?
+  course     Course?  @relation(fields: [courseId], references: [id])
+  timestamp  DateTime @default(now())
+
+  @@index([schoolId, userId, timestamp(sort: Desc)])
+  @@index([entityType, entityId, timestamp(sort: Desc)])
+  @@index([timestamp])
+}
+
+// Precomputed daily analytics snapshots per school.
+// metrics stored as Json because the structure (thetaDistribution, competencyBreakdown,
+// crossCourseComparison) changes as analytics evolve — no benefit in normalizing it.
+model InstitutionMetrics {
+  id       String   @id @default(cuid())
+  schoolId String
+  school   School   @relation(fields: [schoolId], references: [id])
+  date     DateTime
+  metrics  Json // { thetaDistribution, competencyBreakdown, riskCognitiveIndex, crossCourseComparison, teacherPerformance }
+
+  @@unique([schoolId, date])
+  @@index([schoolId, date(sort: Desc)])
+}
+
+// Per-school configuration (upload limits, OCR settings, feature flags).
+// One row per school.
+model SystemConfig {
+  id                    String   @id @default(cuid())
+  schoolId              String   @unique
+  school                School   @relation(fields: [schoolId], references: [id])
+  maxUploadMB           Int      @default(25)
+  ocrReviewWindowDays   Int      @default(14)
+  fileRetentionDays     Int      @default(14)
+  triMinTheta           Float    @default(-4)
+  triMaxTheta           Float    @default(4)
+  triDefaultC           Float    @default(0.25)
+  featurePhysicalGlobal Boolean  @default(false)
+  featureOcrGlobal      Boolean  @default(true)
+  featureModeration     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}

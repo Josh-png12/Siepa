@@ -1,7 +1,5 @@
-const mongoose = require('mongoose');
-const Simulacro = require('../models/Simulacro');
-const SimulacroResult = require('../models/SimulacroResult');
-const Question = require('../models/Question');
+const { Prisma } = require('@prisma/client');
+const prisma = require('../config/prisma');
 const { normalizeQuestionPayload, validateQuestionPayload } = require('./questionService');
 
 const MODULE_NAMES = ['Lectura', 'Matematicas', 'Sociales', 'Ciencias', 'Ingles'];
@@ -11,8 +9,6 @@ const buildError = (message, status = 400) => {
   error.status = status;
   return error;
 };
-
-const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value));
 
 const parsePositiveInt = (value, fieldName, min = 1, max = 200) => {
   const parsed = Number(value);
@@ -32,12 +28,46 @@ const parseOptionalLimit = (value, fieldName, min, max) => {
 };
 
 const assertTeacherOwnsSimulacro = (simulacro, teacherId) => {
-  if (String(simulacro.createdBy) !== String(teacherId)) {
+  if (simulacro.createdById !== teacherId) {
     throw buildError('No tienes permisos sobre este simulacro', 403);
   }
 };
 
-const sanitizeManualModuleQuestions = async ({ questionsInput = [], teacherId, moduleName }) => {
+// ── FULL SIMULACRO INCLUDE ────────────────────────────────────────────────────
+const SIMULACRO_INCLUDE = {
+  createdBy: { select: { id: true, name: true, email: true, role: true } },
+  updatedBy: { select: { id: true, name: true, email: true, role: true } },
+  modules: {
+    orderBy: { order: 'asc' },
+    include: {
+      questions: {
+        orderBy: { order: 'asc' },
+        include: {
+          question: {
+            select: {
+              id: true,
+              statementText: true,
+              statementImages: true,
+              latex: true,
+              options: true,
+              correctAnswer: true,
+              area: true,
+              competencia: true,
+              dificultadCualitativa: true,
+              triParamA: true,
+              triParamB: true,
+              triParamC: true
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
+// ── MODULE BUILDING HELPERS ───────────────────────────────────────────────────
+
+const sanitizeManualModuleQuestions = async ({ questionsInput = [], teacherId, moduleName, schoolId }) => {
   if (!Array.isArray(questionsInput) || questionsInput.length < 1) {
     throw buildError(`El modulo ${moduleName} requiere al menos una pregunta`, 400);
   }
@@ -51,16 +81,16 @@ const sanitizeManualModuleQuestions = async ({ questionsInput = [], teacherId, m
       throw buildError(`Cada pregunta del modulo ${moduleName} requiere order valido`, 400);
     }
 
-    if (item.question && isObjectId(item.question)) {
+    if (item.question) {
       refIds.push(String(item.question));
-      processed.push({ question: String(item.question), embeddedQuestion: null, order });
+      processed.push({ questionId: String(item.question), embeddedQuestion: null, order });
       return;
     }
 
     if (item.embeddedQuestion) {
       const normalized = normalizeQuestionPayload(item.embeddedQuestion);
       validateQuestionPayload(normalized);
-      processed.push({ question: null, embeddedQuestion: normalized, order });
+      processed.push({ questionId: null, embeddedQuestion: normalized, order });
       return;
     }
 
@@ -69,18 +99,19 @@ const sanitizeManualModuleQuestions = async ({ questionsInput = [], teacherId, m
 
   if (refIds.length) {
     const uniqueIds = [...new Set(refIds)];
-    const questions = await Question.find({ _id: { $in: uniqueIds } })
-      .select('_id metadata visibility estado')
-      .lean();
+    const questions = await prisma.question.findMany({
+      where: { id: { in: uniqueIds }, schoolId },
+      select: { id: true, createdById: true, visibility: true, estado: true }
+    });
 
     if (questions.length !== uniqueIds.length) {
       throw buildError(`Una o mas preguntas del modulo ${moduleName} no existen`, 404);
     }
 
-    questions.forEach((question) => {
-      const isOwner = String(question.metadata?.createdBy) === String(teacherId);
-      const isShared = ['institutional', 'national'].includes(question.visibility);
-      const isPublished = question.estado === 'publicada';
+    questions.forEach((q) => {
+      const isOwner = q.createdById === teacherId;
+      const isShared = ['institutional', 'national'].includes(q.visibility);
+      const isPublished = q.estado === 'publicada';
       if (!isOwner && !(isShared && isPublished)) {
         throw buildError(`No tienes acceso a una pregunta del modulo ${moduleName}`, 403);
       }
@@ -90,35 +121,43 @@ const sanitizeManualModuleQuestions = async ({ questionsInput = [], teacherId, m
   return processed;
 };
 
-const buildAutoModuleQuestions = async ({ moduleConfig }) => {
-  const totalQuestions = parsePositiveInt(moduleConfig.totalQuestions, `totalQuestions (${moduleConfig.name})`, 1, 120);
+// Uses raw SQL to order by ABS(triParamB - targetTheta) — not supported in Prisma ORM
+// schoolId filter prevents mixing questions across tenants (multi-tenant fix)
+const buildAutoModuleQuestions = async ({ moduleConfig, schoolId }) => {
+  const totalQuestions = parsePositiveInt(
+    moduleConfig.totalQuestions,
+    `totalQuestions (${moduleConfig.name})`,
+    1,
+    120
+  );
   const targetTheta = Number(moduleConfig.targetTheta);
   if (!Number.isFinite(targetTheta)) {
     throw buildError(`targetTheta (${moduleConfig.name}) debe ser numerico`, 400);
   }
 
-  const match = { estado: 'publicada' };
-  if (moduleConfig.area) match.area = String(moduleConfig.area).trim();
-  if (moduleConfig.competencia) match.competencia = String(moduleConfig.competencia).trim();
+  const conditions = [
+    Prisma.sql`"schoolId" = ${schoolId}`,
+    Prisma.sql`estado = 'publicada'`
+  ];
+  if (moduleConfig.area) conditions.push(Prisma.sql`area = ${String(moduleConfig.area).trim()}`);
+  if (moduleConfig.competencia) conditions.push(Prisma.sql`competencia = ${String(moduleConfig.competencia).trim()}`);
 
-  const selected = await Question.aggregate([
-    { $match: match },
-    {
-      $addFields: {
-        thetaDistance: { $abs: { $subtract: ['$triParams.b', targetTheta] } }
-      }
-    },
-    { $sort: { thetaDistance: 1, _id: 1 } },
-    { $limit: totalQuestions },
-    { $project: { _id: 1 } }
-  ]);
+  const whereClause = Prisma.join(conditions, ' AND ');
+
+  const selected = await prisma.$queryRaw`
+    SELECT id
+    FROM "Question"
+    WHERE ${whereClause}
+    ORDER BY ABS("triParamB" - ${targetTheta}) ASC, id ASC
+    LIMIT ${totalQuestions}
+  `;
 
   if (selected.length < totalQuestions) {
     throw buildError(`No hay suficientes preguntas para el modulo ${moduleConfig.name}`, 400);
   }
 
-  return selected.map((item, index) => ({
-    question: item._id,
+  return selected.map((row, index) => ({
+    questionId: row.id,
     embeddedQuestion: null,
     order: index + 1
   }));
@@ -132,7 +171,7 @@ const normalizeModuleName = (name) => {
   return value;
 };
 
-const buildManualModules = async ({ modulesInput, teacherId }) => {
+const buildManualModules = async ({ modulesInput, teacherId, schoolId }) => {
   if (!Array.isArray(modulesInput) || modulesInput.length < 1) {
     throw buildError('Debes enviar al menos un modulo', 400);
   }
@@ -140,29 +179,26 @@ const buildManualModules = async ({ modulesInput, teacherId }) => {
   const names = new Set();
   const modules = [];
 
-  for (const moduleItem of modulesInput) {
-    const name = normalizeModuleName(moduleItem.name);
+  for (const item of modulesInput) {
+    const name = normalizeModuleName(item.name);
     if (names.has(name)) throw buildError(`Modulo repetido: ${name}`, 400);
     names.add(name);
 
-    const timeLimit = parseOptionalLimit(moduleItem.timeLimit, `timeLimit (${name})`, 5, 180);
+    const timeLimit = parseOptionalLimit(item.timeLimit, `timeLimit (${name})`, 5, 180);
     const questions = await sanitizeManualModuleQuestions({
-      questionsInput: moduleItem.questions,
+      questionsInput: item.questions,
       teacherId,
-      moduleName: name
+      moduleName: name,
+      schoolId
     });
 
-    modules.push({
-      name,
-      questions,
-      timeLimit
-    });
+    modules.push({ name, questions, timeLimit });
   }
 
   return modules;
 };
 
-const buildAutoModules = async ({ modulesInput }) => {
+const buildAutoModules = async ({ modulesInput, schoolId }) => {
   if (!Array.isArray(modulesInput) || modulesInput.length < 1) {
     throw buildError('Debes enviar al menos un modulo para generacion inteligente', 400);
   }
@@ -170,75 +206,102 @@ const buildAutoModules = async ({ modulesInput }) => {
   const names = new Set();
   const modules = [];
 
-  for (const moduleItem of modulesInput) {
-    const name = normalizeModuleName(moduleItem.name);
+  for (const item of modulesInput) {
+    const name = normalizeModuleName(item.name);
     if (names.has(name)) throw buildError(`Modulo repetido: ${name}`, 400);
     names.add(name);
 
-    const questions = await buildAutoModuleQuestions({ moduleConfig: moduleItem });
-    const timeLimit = parseOptionalLimit(moduleItem.timeLimit, `timeLimit (${name})`, 5, 180);
+    const questions = await buildAutoModuleQuestions({ moduleConfig: item, schoolId });
+    const timeLimit = parseOptionalLimit(item.timeLimit, `timeLimit (${name})`, 5, 180);
 
-    modules.push({
-      name,
-      questions,
-      timeLimit
-    });
+    modules.push({ name, questions, timeLimit });
   }
 
   return modules;
 };
 
-const mapSimulacroDoc = (simulacro) =>
-  Simulacro.findById(simulacro._id)
-    .populate('createdBy', 'name email role')
-    .populate('updatedBy', 'name email role')
-    .populate('modules.questions.question', 'statement latex options correctAnswer area competencia dificultadCualitativa triParams')
-    .lean();
+// Creates Simulacro + SimulacroModules + SimulacroQuestions in a transaction
+const createSimulacroWithModules = async ({ data, modules }) => {
+  return prisma.$transaction(async (tx) => {
+    const simulacro = await tx.simulacro.create({ data });
 
-const createManualSimulacro = async (payload, teacherId) => {
+    for (let mi = 0; mi < modules.length; mi++) {
+      const mod = modules[mi];
+      const moduleRecord = await tx.simulacroModule.create({
+        data: {
+          simulacroId: simulacro.id,
+          name: mod.name,
+          timeLimit: mod.timeLimit,
+          order: mi + 1
+        }
+      });
+
+      for (const q of mod.questions) {
+        await tx.simulacroQuestion.create({
+          data: {
+            moduleId: moduleRecord.id,
+            questionId: q.questionId || null,
+            embeddedQuestion: q.embeddedQuestion || null,
+            order: q.order
+          }
+        });
+      }
+    }
+
+    return tx.simulacro.findUnique({ where: { id: simulacro.id }, include: SIMULACRO_INCLUDE });
+  });
+};
+
+// ── PUBLIC API ────────────────────────────────────────────────────────────────
+
+const createManualSimulacro = async (payload, user) => {
   const title = String(payload.title || '').trim();
   if (!title) throw buildError('title es requerido', 400);
 
-  const modules = await buildManualModules({ modulesInput: payload.modules, teacherId });
-  const globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360);
-
-  const simulacro = await Simulacro.create({
-    title,
-    description: String(payload.description || '').trim(),
-    modules,
-    globalTimeLimit,
-    strictMode: Boolean(payload.strictMode),
-    estado: 'borrador',
-    createdBy: teacherId,
-    updatedBy: teacherId
+  const modules = await buildManualModules({
+    modulesInput: payload.modules,
+    teacherId: user.id,
+    schoolId: user.schoolId
   });
 
-  return mapSimulacroDoc(simulacro);
+  return createSimulacroWithModules({
+    data: {
+      schoolId: user.schoolId,
+      title,
+      description: String(payload.description || '').trim(),
+      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360),
+      strictMode: Boolean(payload.strictMode),
+      estado: 'borrador',
+      createdById: user.id,
+      updatedById: user.id
+    },
+    modules
+  });
 };
 
-const createSmartSimulacro = async (payload, teacherId) => {
+const createSmartSimulacro = async (payload, user) => {
   const title = String(payload.title || '').trim();
   if (!title) throw buildError('title es requerido', 400);
 
-  const modules = await buildAutoModules({ modulesInput: payload.modules });
-  const globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360);
+  const modules = await buildAutoModules({ modulesInput: payload.modules, schoolId: user.schoolId });
 
-  const simulacro = await Simulacro.create({
-    title,
-    description: String(payload.description || '').trim(),
-    modules,
-    globalTimeLimit,
-    strictMode: Boolean(payload.strictMode),
-    estado: 'borrador',
-    createdBy: teacherId,
-    updatedBy: teacherId
+  return createSimulacroWithModules({
+    data: {
+      schoolId: user.schoolId,
+      title,
+      description: String(payload.description || '').trim(),
+      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360),
+      strictMode: Boolean(payload.strictMode),
+      estado: 'borrador',
+      createdById: user.id,
+      updatedById: user.id
+    },
+    modules
   });
-
-  return mapSimulacroDoc(simulacro);
 };
 
-const getSimulacrosByTeacher = async (query, teacherId) => {
-  const where = { createdBy: teacherId };
+const getSimulacrosByTeacher = async (query, user) => {
+  const where = { schoolId: user.schoolId, createdById: user.id };
   if (query.estado) where.estado = query.estado;
 
   const page = Math.max(parseInt(query.page || '1', 10), 1);
@@ -246,392 +309,367 @@ const getSimulacrosByTeacher = async (query, teacherId) => {
   const skip = (page - 1) * limit;
 
   const [total, items] = await Promise.all([
-    Simulacro.countDocuments(where),
-    Simulacro.find(where)
-      .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
+    prisma.simulacro.count({ where }),
+    prisma.simulacro.findMany({ where, orderBy: { updatedAt: 'desc' }, skip, take: limit })
   ]);
 
   return {
     items,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    }
+    pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
   };
 };
 
 const getSimulacroById = async (id, userId, role = 'docente') => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const simulacro = await Simulacro.findById(id)
-    .populate('createdBy', 'name email role')
-    .populate('updatedBy', 'name email role')
-    .populate('modules.questions.question', 'statement latex options correctAnswer area competencia dificultadCualitativa triParams')
-    .lean();
+  const simulacro = await prisma.simulacro.findUnique({ where: { id }, include: SIMULACRO_INCLUDE });
 
   if (!simulacro) throw buildError('Simulacro no encontrado', 404);
 
   if (role === 'docente') {
     assertTeacherOwnsSimulacro(simulacro, userId);
   } else if (role === 'estudiante') {
-    if (simulacro.estado !== 'publicado') {
-      throw buildError('Simulacro no disponible', 403);
-    }
+    if (simulacro.estado !== 'publicado') throw buildError('Simulacro no disponible', 403);
   }
 
   return simulacro;
 };
 
-const updateSimulacro = async (id, payload, teacherId) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const simulacro = await Simulacro.findById(id);
+const updateSimulacro = async (id, payload, user) => {
+  const simulacro = await prisma.simulacro.findUnique({ where: { id } });
   if (!simulacro) throw buildError('Simulacro no encontrado', 404);
 
-  assertTeacherOwnsSimulacro(simulacro, teacherId);
+  assertTeacherOwnsSimulacro(simulacro, user.id);
 
   if (simulacro.estado !== 'borrador') {
     throw buildError('Solo puedes editar simulacros en borrador', 400);
   }
 
+  const updateData = { updatedById: user.id };
+
   if (payload.title !== undefined) {
     const title = String(payload.title || '').trim();
     if (!title) throw buildError('title no puede estar vacio', 400);
-    simulacro.title = title;
+    updateData.title = title;
   }
-
-  if (payload.description !== undefined) {
-    simulacro.description = String(payload.description || '').trim();
-  }
-
-  if (payload.strictMode !== undefined) {
-    simulacro.strictMode = Boolean(payload.strictMode);
-  }
-
+  if (payload.description !== undefined) updateData.description = String(payload.description || '').trim();
+  if (payload.strictMode !== undefined) updateData.strictMode = Boolean(payload.strictMode);
   if (payload.globalTimeLimit !== undefined) {
-    simulacro.globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360);
+    updateData.globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360);
   }
 
   if (payload.modules !== undefined) {
-    simulacro.modules = await buildManualModules({ modulesInput: payload.modules, teacherId });
+    // Rebuild modules: delete old, create new (in a transaction)
+    const newModules = await buildManualModules({
+      modulesInput: payload.modules,
+      teacherId: user.id,
+      schoolId: user.schoolId
+    });
+
+    return prisma.$transaction(async (tx) => {
+      const existingModules = await tx.simulacroModule.findMany({ where: { simulacroId: id }, select: { id: true } });
+      for (const mod of existingModules) {
+        await tx.simulacroQuestion.deleteMany({ where: { moduleId: mod.id } });
+      }
+      await tx.simulacroModule.deleteMany({ where: { simulacroId: id } });
+
+      await tx.simulacro.update({ where: { id }, data: updateData });
+
+      for (let mi = 0; mi < newModules.length; mi++) {
+        const mod = newModules[mi];
+        const moduleRecord = await tx.simulacroModule.create({
+          data: { simulacroId: id, name: mod.name, timeLimit: mod.timeLimit, order: mi + 1 }
+        });
+        for (const q of mod.questions) {
+          await tx.simulacroQuestion.create({
+            data: { moduleId: moduleRecord.id, questionId: q.questionId || null, embeddedQuestion: q.embeddedQuestion || null, order: q.order }
+          });
+        }
+      }
+
+      return tx.simulacro.findUnique({ where: { id }, include: SIMULACRO_INCLUDE });
+    });
   }
 
-  simulacro.updatedBy = teacherId;
-  await simulacro.save();
-
-  return mapSimulacroDoc(simulacro);
+  return prisma.simulacro.update({ where: { id }, data: updateData, include: SIMULACRO_INCLUDE });
 };
 
-const publishSimulacro = async (id, teacherId) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const simulacro = await Simulacro.findById(id);
+const publishSimulacro = async (id, user) => {
+  const simulacro = await prisma.simulacro.findUnique({
+    where: { id },
+    include: { modules: { include: { questions: { select: { id: true } } } } }
+  });
   if (!simulacro) throw buildError('Simulacro no encontrado', 404);
 
-  assertTeacherOwnsSimulacro(simulacro, teacherId);
+  assertTeacherOwnsSimulacro(simulacro, user.id);
 
-  const totalQuestions = (simulacro.modules || []).reduce(
-    (acc, moduleItem) => acc + (moduleItem.questions?.length || 0),
+  const totalQuestions = simulacro.modules.reduce(
+    (acc, m) => acc + m.questions.length,
     0
   );
-
   if (totalQuestions < 1) {
     throw buildError('No puedes publicar un simulacro sin preguntas', 400);
   }
 
-  simulacro.estado = 'publicado';
-  simulacro.fechaPublicacion = new Date();
-  simulacro.updatedBy = teacherId;
-
-  await simulacro.save();
-
-  return mapSimulacroDoc(simulacro);
+  return prisma.simulacro.update({
+    where: { id },
+    data: { estado: 'publicado', fechaPublicacion: new Date(), updatedById: user.id },
+    include: SIMULACRO_INCLUDE
+  });
 };
 
-const deleteSimulacro = async (id, teacherId) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const simulacro = await Simulacro.findById(id);
+const deleteSimulacro = async (id, user) => {
+  const simulacro = await prisma.simulacro.findUnique({ where: { id } });
   if (!simulacro) throw buildError('Simulacro no encontrado', 404);
 
-  assertTeacherOwnsSimulacro(simulacro, teacherId);
+  assertTeacherOwnsSimulacro(simulacro, user.id);
 
-  await Promise.all([
-    SimulacroResult.deleteMany({ simulacroId: simulacro._id }),
-    Simulacro.findByIdAndDelete(simulacro._id)
-  ]);
+  // Cascade deletes handled by onDelete: Cascade in schema for modules/questions/results
+  await prisma.simulacro.delete({ where: { id } });
 };
 
-const getAvailableSimulacrosForStudent = async (query) => {
+const getAvailableSimulacrosForStudent = async (query, schoolId) => {
+  const where = { schoolId, estado: 'publicado' };
+
   const page = Math.max(parseInt(query.page || '1', 10), 1);
   const limit = Math.min(Math.max(parseInt(query.limit || '20', 10), 1), 100);
   const skip = (page - 1) * limit;
 
-  const where = { estado: 'publicado' };
-
   const [total, items] = await Promise.all([
-    Simulacro.countDocuments(where),
-    Simulacro.find(where)
-      .select('title description modules globalTimeLimit strictMode estado fechaPublicacion createdBy createdAt')
-      .sort({ fechaPublicacion: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
+    prisma.simulacro.count({ where }),
+    prisma.simulacro.findMany({
+      where,
+      select: {
+        id: true, title: true, description: true, globalTimeLimit: true,
+        strictMode: true, estado: true, fechaPublicacion: true,
+        createdBy: { select: { id: true, name: true } },
+        _count: { select: { modules: true } }
+      },
+      orderBy: [{ fechaPublicacion: 'desc' }, { createdAt: 'desc' }],
+      skip,
+      take: limit
+    })
   ]);
 
   return {
     items,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    }
+    pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
   };
 };
 
-const flattenModuleQuestions = (simulacro) => {
-  const flat = [];
-  (simulacro.modules || []).forEach((moduleItem) => {
-    (moduleItem.questions || []).forEach((moduleQuestion) => {
-      if (moduleQuestion.question) {
-        flat.push({
-          questionId: String(moduleQuestion.question),
-          moduleName: moduleItem.name
-        });
-      }
-    });
-  });
-  return flat;
-};
-
-const startSimulacro = async (simulacroId, studentId) => {
-  if (!isObjectId(simulacroId)) throw buildError('id invalido', 400);
-
-  const simulacro = await Simulacro.findById(simulacroId)
-    .populate('modules.questions.question', 'statement latex options area competencia dificultadCualitativa triParams')
-    .lean();
-
-  if (!simulacro) throw buildError('Simulacro no encontrado', 404);
-  if (simulacro.estado !== 'publicado') throw buildError('Simulacro no disponible', 403);
-
-  const previous = await SimulacroResult.findOne({
-    simulacroId,
-    studentId,
-    status: 'in_progress'
-  })
-    .sort({ createdAt: -1 })
-    .lean();
-
-  if (previous) {
-    return {
-      attemptId: previous._id,
-      resumed: true,
-      simulacro
-    };
-  }
-
-  const moduleTimes = (simulacro.modules || []).map((moduleItem) => ({
-    moduleName: moduleItem.name,
-    secondsSpent: 0
-  }));
-
-  const attempt = await SimulacroResult.create({
-    simulacroId,
-    studentId,
-    answers: [],
-    markedForReview: [],
-    moduleTimes,
-    status: 'in_progress',
-    startTime: new Date()
-  });
-
-  return {
-    attemptId: attempt._id,
-    resumed: false,
-    simulacro
-  };
-};
+// ── TRI / SCORING ─────────────────────────────────────────────────────────────
 
 const erfApprox = (x) => {
   const sign = x < 0 ? -1 : 1;
   const absX = Math.abs(x);
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-  const t = 1 / (1 + p * absX);
-  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+  const t = 1 / (1 + 0.3275911 * absX);
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-absX * absX);
   return sign * y;
 };
 
 const toPercentile = (theta) => {
-  const z = Number(theta) / Math.sqrt(2);
-  const cdf = 0.5 * (1 + erfApprox(z));
+  const cdf = 0.5 * (1 + erfApprox(Number(theta) / Math.sqrt(2)));
   return Math.max(1, Math.min(99, Math.round(cdf * 100)));
 };
 
 const scoreTheta = (answers, questionsMap) => {
   if (!answers.length) return 0;
-
   let weighted = 0;
   let totalWeight = 0;
 
   answers.forEach((answer) => {
-    const question = questionsMap.get(String(answer.questionId));
-    if (!question) return;
-
-    const isCorrect = String(answer.selectedOption) === String(question.correctAnswer);
-    const a = Number(question.triParams?.a ?? 1);
-    const b = Number(question.triParams?.b ?? 0);
+    const q = questionsMap.get(String(answer.questionId));
+    if (!q) return;
+    const isCorrect = String(answer.selectedOption) === String(q.correctAnswer);
+    const a = Number(q.triParamA ?? 1);
+    const b = Number(q.triParamB ?? 0);
     const sign = isCorrect ? 1 : -1;
-
     weighted += sign * a * Math.max(0.3, 1 - Math.abs(b) / 3);
     totalWeight += Math.max(a, 0.1);
   });
 
   if (totalWeight === 0) return 0;
-
-  const raw = (weighted / totalWeight) * 3;
-  return Math.max(-3, Math.min(3, Number(raw.toFixed(4))));
+  return Math.max(-3, Math.min(3, Number(((weighted / totalWeight) * 3).toFixed(4))));
 };
 
-const submitSimulacro = async ({ simulacroId, studentId, answersInput, moduleTimesInput, markedForReviewInput }) => {
-  if (!isObjectId(simulacroId)) throw buildError('id invalido', 400);
+// ── EXAM SESSION ──────────────────────────────────────────────────────────────
 
-  const simulacro = await Simulacro.findById(simulacroId)
-    .populate('modules.questions.question', 'correctAnswer triParams area competencia')
-    .lean();
+const startSimulacro = async (simulacroId, studentId, schoolId) => {
+  const simulacro = await prisma.simulacro.findUnique({
+    where: { id: simulacroId },
+    include: SIMULACRO_INCLUDE
+  });
 
   if (!simulacro) throw buildError('Simulacro no encontrado', 404);
   if (simulacro.estado !== 'publicado') throw buildError('Simulacro no disponible', 403);
 
-  const attempt = await SimulacroResult.findOne({
-    simulacroId,
-    studentId,
-    status: 'in_progress'
-  }).sort({ createdAt: -1 });
+  const previous = await prisma.simulacroResult.findFirst({
+    where: { simulacroId, studentId, status: 'in_progress' },
+    orderBy: { createdAt: 'desc' }
+  });
 
-  if (!attempt) {
-    throw buildError('No hay un intento activo para este simulacro', 400);
+  if (previous) {
+    return { attemptId: previous.id, resumed: true, simulacro };
   }
 
-  const flatQuestions = flattenModuleQuestions(simulacro);
-  const validQuestionIds = new Set(flatQuestions.map((item) => item.questionId));
-  const questionModuleMap = new Map(flatQuestions.map((item) => [item.questionId, item.moduleName]));
-
-  const allQuestionDocs = [];
-  (simulacro.modules || []).forEach((moduleItem) => {
-    (moduleItem.questions || []).forEach((q) => {
-      if (q.question) allQuestionDocs.push(q.question);
-    });
+  const attempt = await prisma.simulacroResult.create({
+    data: {
+      simulacroId,
+      studentId,
+      schoolId,
+      status: 'in_progress',
+      startTime: new Date(),
+      moduleTimes: {
+        create: simulacro.modules.map((m) => ({ moduleName: m.name, secondsSpent: 0 }))
+      }
+    }
   });
-  const questionsMap = new Map(allQuestionDocs.map((q) => [String(q._id), q]));
 
-  const normalizedAnswers = [];
+  return { attemptId: attempt.id, resumed: false, simulacro };
+};
+
+const submitSimulacro = async ({
+  simulacroId,
+  studentId,
+  schoolId,
+  answersInput,
+  moduleTimesInput,
+  markedForReviewInput
+}) => {
+  const simulacro = await prisma.simulacro.findUnique({
+    where: { id: simulacroId },
+    include: SIMULACRO_INCLUDE
+  });
+
+  if (!simulacro) throw buildError('Simulacro no encontrado', 404);
+  if (simulacro.estado !== 'publicado') throw buildError('Simulacro no disponible', 403);
+
+  const attempt = await prisma.simulacroResult.findFirst({
+    where: { simulacroId, studentId, status: 'in_progress' },
+    orderBy: { createdAt: 'desc' }
+  });
+  if (!attempt) throw buildError('No hay un intento activo para este simulacro', 400);
+
+  // Build maps for validation and scoring
+  const sqByQuestionId = new Map(); // questionId → SimulacroQuestion.id
+  const questionsMap = new Map();    // questionId → Question data
+
+  for (const mod of simulacro.modules) {
+    for (const sq of mod.questions) {
+      const qId = sq.questionId || (sq.embeddedQuestion ? `embedded-${sq.id}` : null);
+      if (!qId) continue;
+      sqByQuestionId.set(qId, sq.id);
+      if (sq.question) questionsMap.set(qId, sq.question);
+    }
+  }
+
+  const moduleByQuestionId = new Map();
+  for (const mod of simulacro.modules) {
+    for (const sq of mod.questions) {
+      if (sq.questionId) moduleByQuestionId.set(sq.questionId, mod.name);
+    }
+  }
+
   const answersArray = Array.isArray(answersInput) ? answersInput : [];
+  const dedupMap = new Map();
 
   for (const item of answersArray) {
     const questionId = String(item.questionId || '');
     const selectedOption = String(item.selectedOption || '').toUpperCase();
+    const sqId = sqByQuestionId.get(questionId);
 
-    if (!isObjectId(questionId) || !validQuestionIds.has(questionId)) {
-      throw buildError('Una respuesta contiene questionId invalido para este simulacro', 400);
-    }
-
+    if (!sqId) throw buildError('Una respuesta contiene questionId invalido para este simulacro', 400);
     if (!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(selectedOption)) {
       throw buildError('selectedOption invalida', 400);
     }
 
-    const question = questionsMap.get(questionId);
-    normalizedAnswers.push({
-      questionId,
+    const q = questionsMap.get(questionId);
+    dedupMap.set(questionId, {
+      simulacroQuestionId: sqId,
       selectedOption,
-      isCorrect: selectedOption === String(question.correctAnswer)
+      isCorrect: q ? selectedOption === String(q.correctAnswer) : null
     });
   }
 
-  const dedupMap = new Map();
-  normalizedAnswers.forEach((answer) => {
-    dedupMap.set(String(answer.questionId), answer);
-  });
   const dedupedAnswers = Array.from(dedupMap.values());
+  const moduleNames = simulacro.modules.map((m) => m.name);
 
-  const moduleNames = (simulacro.modules || []).map((moduleItem) => moduleItem.name);
   const moduleTimes = moduleNames.map((name) => {
     const source = Array.isArray(moduleTimesInput)
-      ? moduleTimesInput.find((item) => item && item.moduleName === name)
+      ? moduleTimesInput.find((t) => t && t.moduleName === name)
       : null;
-    return {
-      moduleName: name,
-      secondsSpent: Math.max(0, Number(source?.secondsSpent || 0))
-    };
+    return { moduleName: name, secondsSpent: Math.max(0, Number(source?.secondsSpent || 0)) };
   });
 
   const thetasByModule = moduleNames.map((name) => {
     const answersForModule = dedupedAnswers.filter(
-      (answer) => questionModuleMap.get(String(answer.questionId)) === name
+      (a) => moduleByQuestionId.get(
+        Object.keys(Object.fromEntries(sqByQuestionId)).find((k) => sqByQuestionId.get(k) === a.simulacroQuestionId)
+      ) === name
     );
-
-    return {
-      moduleName: name,
-      theta: scoreTheta(answersForModule, questionsMap)
-    };
+    return { moduleName: name, theta: scoreTheta(answersForModule, questionsMap) };
   });
 
   const overallTheta = thetasByModule.length
     ? Number(
         (
-          thetasByModule.reduce((sum, item) => sum + Number(item.theta || 0), 0) /
-          thetasByModule.length
+          thetasByModule.reduce((sum, t) => sum + Number(t.theta || 0), 0) / thetasByModule.length
         ).toFixed(4)
       )
     : 0;
 
   const percentile = toPercentile(overallTheta);
-
   const markIds = Array.isArray(markedForReviewInput)
-    ? markedForReviewInput.filter((id) => isObjectId(id)).map((id) => new mongoose.Types.ObjectId(String(id)))
+    ? markedForReviewInput.filter((id) => typeof id === 'string')
     : [];
 
-  attempt.answers = dedupedAnswers;
-  attempt.markedForReview = markIds;
-  attempt.moduleTimes = moduleTimes;
-  attempt.thetasByModule = thetasByModule;
-  attempt.overallTheta = overallTheta;
-  attempt.percentile = percentile;
-  attempt.endTime = new Date();
-  attempt.status = 'submitted';
+  await prisma.$transaction(async (tx) => {
+    await tx.simulacroAnswer.deleteMany({ where: { resultId: attempt.id } });
+    await tx.simulacroModuleTime.deleteMany({ where: { resultId: attempt.id } });
+    await tx.simulacroModuleTheta.deleteMany({ where: { resultId: attempt.id } });
 
-  await attempt.save();
+    for (const a of dedupedAnswers) {
+      await tx.simulacroAnswer.create({ data: { resultId: attempt.id, ...a } });
+    }
+    for (const t of moduleTimes) {
+      await tx.simulacroModuleTime.create({ data: { resultId: attempt.id, ...t } });
+    }
+    for (const t of thetasByModule) {
+      await tx.simulacroModuleTheta.create({ data: { resultId: attempt.id, ...t } });
+    }
 
-  return SimulacroResult.findById(attempt._id)
-    .populate('simulacroId', 'title modules globalTimeLimit strictMode')
-    .lean();
+    await tx.simulacroResult.update({
+      where: { id: attempt.id },
+      data: { overallTheta, percentile, endTime: new Date(), status: 'submitted', markedForReview: markIds }
+    });
+  });
+
+  return prisma.simulacroResult.findUnique({
+    where: { id: attempt.id },
+    include: {
+      simulacro: { select: { title: true, globalTimeLimit: true, strictMode: true } },
+      answers: true,
+      moduleTimes: true,
+      moduleThetas: true
+    }
+  });
 };
 
 const getStudentResultsForSimulacro = async (simulacroId, studentId) => {
-  if (!isObjectId(simulacroId)) throw buildError('id invalido', 400);
+  const result = await prisma.simulacroResult.findFirst({
+    where: { simulacroId, studentId, status: 'submitted' },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      simulacro: { select: { title: true, globalTimeLimit: true, strictMode: true } },
+      answers: true,
+      moduleTimes: true,
+      moduleThetas: true
+    }
+  });
 
-  const result = await SimulacroResult.findOne({
-    simulacroId,
-    studentId,
-    status: 'submitted'
-  })
-    .sort({ createdAt: -1 })
-    .populate('simulacroId', 'title modules globalTimeLimit strictMode')
-    .lean();
-
-  if (!result) {
-    throw buildError('No hay resultados para este simulacro', 404);
-  }
+  if (!result) throw buildError('No hay resultados para este simulacro', 404);
 
   return result;
 };

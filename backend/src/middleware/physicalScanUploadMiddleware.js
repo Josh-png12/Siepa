@@ -2,11 +2,14 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const uploadDir = path.join(process.cwd(), 'uploads', 'physical-scans');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (req, _file, cb) => {
+    // Store under uploads/physical-simulacros/:id/ so parsePDF's path check passes
+    const simulacroId = req.params.id || 'unknown';
+    const dir = path.join(process.cwd(), 'uploads', 'physical-simulacros', simulacroId);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
   filename: (_req, file, cb) => {
     const safeName = file.originalname.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
     cb(null, `${Date.now()}-${safeName}`);

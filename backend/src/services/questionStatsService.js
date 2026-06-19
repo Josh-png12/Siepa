@@ -1,4 +1,4 @@
-const Question = require('../models/Question');
+const prisma = require('../config/prisma');
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -14,7 +14,6 @@ const calculateDiscriminationIndex = ({ correctThetas = [], wrongThetas = [] }) 
   const mean = (arr) => arr.reduce((sum, value) => sum + value, 0) / arr.length;
   const diff = mean(correctThetas) - mean(wrongThetas);
 
-  // Escalado suave a rango [-1, 1]
   return Number(clamp(Math.tanh(diff / 2), -1, 1).toFixed(4));
 };
 
@@ -45,24 +44,30 @@ const updateQuestionStatsFromResponses = async (responses = []) => {
   }, {});
 
   const ids = Object.keys(grouped);
-  const questions = await Question.find({ _id: { $in: ids } });
+
+  const questions = await prisma.question.findMany({
+    where: { id: { in: ids } }
+  });
 
   const updated = [];
 
   for (const question of questions) {
-    const data = grouped[String(question._id)];
-    const prevTimesUsed = question.stats?.timesUsed || 0;
-    const prevCorrectRate = question.stats?.correctRate || 0;
+    const data = grouped[question.id];
+    const prevTimesUsed = question.statsTimesUsed || 0;
+    const prevCorrectRate = question.statsCorrectRate || 0;
 
     const newTimesUsed = prevTimesUsed + data.total;
     const batchCorrectRate = data.correct / data.total;
     const newCorrectRate =
       newTimesUsed === 0
         ? 0
-        : ((prevCorrectRate * prevTimesUsed) + (batchCorrectRate * data.total)) / newTimesUsed;
+        : (prevCorrectRate * prevTimesUsed + batchCorrectRate * data.total) / newTimesUsed;
 
-    const prevWrongCount = Math.max(prevTimesUsed - Math.round(prevCorrectRate * prevTimesUsed), 0);
-    const prevAvgThetaWrong = question.stats?.avgThetaWrong || 0;
+    const prevWrongCount = Math.max(
+      prevTimesUsed - Math.round(prevCorrectRate * prevTimesUsed),
+      0
+    );
+    const prevAvgThetaWrong = question.statsAvgThetaWrong || 0;
     const newWrongCount = prevWrongCount + data.wrongThetas.length;
 
     const batchWrongAvg = data.wrongThetas.length
@@ -72,18 +77,23 @@ const updateQuestionStatsFromResponses = async (responses = []) => {
     const newAvgThetaWrong =
       newWrongCount === 0
         ? 0
-        : ((prevAvgThetaWrong * prevWrongCount) + (batchWrongAvg * data.wrongThetas.length)) / newWrongCount;
+        : (prevAvgThetaWrong * prevWrongCount + batchWrongAvg * data.wrongThetas.length) /
+          newWrongCount;
 
-    question.stats.timesUsed = newTimesUsed;
-    question.stats.correctRate = Number(clamp(newCorrectRate, 0, 1).toFixed(6));
-    question.stats.avgThetaWrong = Number(newAvgThetaWrong.toFixed(6));
-    question.stats.discriminationIndex = calculateDiscriminationIndex({
-      correctThetas: data.correctThetas,
-      wrongThetas: data.wrongThetas
+    await prisma.question.update({
+      where: { id: question.id },
+      data: {
+        statsTimesUsed: newTimesUsed,
+        statsCorrectRate: Number(clamp(newCorrectRate, 0, 1).toFixed(6)),
+        statsAvgThetaWrong: Number(newAvgThetaWrong.toFixed(6)),
+        statsDiscriminationIndex: calculateDiscriminationIndex({
+          correctThetas: data.correctThetas,
+          wrongThetas: data.wrongThetas
+        })
+      }
     });
 
-    await question.save();
-    updated.push(question._id);
+    updated.push(question.id);
   }
 
   return { updatedCount: updated.length, ids: updated };

@@ -18,7 +18,11 @@ const loadCanvas = () => {
   try {
     return require('canvas');
   } catch (_error) {
-    throw new ApiError(500, 'DependencyMissing', ['canvas no esta instalado']);
+    try {
+      return require('@napi-rs/canvas');
+    } catch (_error2) {
+      throw new ApiError(500, 'DependencyMissing', ['canvas no esta instalado']);
+    }
   }
 };
 

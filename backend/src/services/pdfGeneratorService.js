@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { jsPDF } = require('jspdf');
+const qrcode = require('qrcode');
 const omrCoordinates = require('../config/omrCoordinates.json');
 
 const OUTPUT_BASE = path.join(process.cwd(), 'uploads', 'physical-simulacros');
@@ -11,33 +12,20 @@ const ensureDir = (dirPath) => {
 
 const mmToPt = (mm) => (mm * 72) / 25.4;
 
-const drawPseudoQr = (doc, payload, x, y, size) => {
-  const cells = 21;
-  const cellSize = size / cells;
-  let seed = 0;
-  for (let i = 0; i < payload.length; i += 1) {
-    seed = (seed + payload.charCodeAt(i) * (i + 3)) % 2147483647;
+const addRealQr = async (doc, payload, x, y, size) => {
+  try {
+    const dataUrl = await qrcode.toDataURL(payload, {
+      width: 512,
+      margin: 1,
+      errorCorrectionLevel: 'M'
+    });
+    doc.addImage(dataUrl, 'PNG', x, y, size, size);
+  } catch (_error) {
+    // Fallback: draw a simple X so the position is visible even if QR generation fails
+    doc.setDrawColor(0);
+    doc.line(x, y, x + size, y + size);
+    doc.line(x + size, y, x, y + size);
   }
-
-  for (let row = 0; row < cells; row += 1) {
-    for (let col = 0; col < cells; col += 1) {
-      seed = (seed * 48271) % 2147483647;
-      const on = (seed % 100) < 48;
-      if (on) {
-        doc.rect(x + col * cellSize, y + row * cellSize, cellSize, cellSize, 'F');
-      }
-    }
-  }
-
-  // finder-like corners
-  doc.setDrawColor(0, 0, 0);
-  const finder = (fx, fy) => {
-    doc.rect(fx, fy, 5 * cellSize, 5 * cellSize);
-    doc.rect(fx + cellSize, fy + cellSize, 3 * cellSize, 3 * cellSize);
-  };
-  finder(x, y);
-  finder(x + size - 5 * cellSize, y);
-  finder(x, y + size - 5 * cellSize);
 };
 
 const saveDoc = async (doc, targetPath) => {
@@ -61,7 +49,7 @@ const renderExamPdf = async ({ student, simulacro, questions, destinationPath })
   doc.text(`Curso: ${student.courseName || '-'}`, 15, 37);
   doc.text(`Fecha: ${new Date(simulacro.date).toLocaleDateString()}`, 15, 42);
 
-  drawPseudoQr(doc, student.qrPayload, 176, 15, 25);
+  await addRealQr(doc, student.qrPayload, 176, 15, 25);
 
   let y = 50;
   questions.forEach((question, index) => {
@@ -110,7 +98,7 @@ const renderOmrPdf = async ({ student, simulacro, destinationPath }) => {
   doc.text(`ID: ${student.studentDocument || '-'}`, 15, 25);
   doc.text(`Curso: ${student.courseName || '-'}`, 15, 29);
 
-  drawPseudoQr(doc, student.qrPayload, omrCoordinates.qr.x, omrCoordinates.qr.y, omrCoordinates.qr.size);
+  await addRealQr(doc, student.qrPayload, omrCoordinates.qr.x, omrCoordinates.qr.y, omrCoordinates.qr.size);
 
   doc.setLineWidth(0.3);
 

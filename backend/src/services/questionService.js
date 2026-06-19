@@ -1,6 +1,4 @@
-const mongoose = require('mongoose');
-const Question = require('../models/Question');
-const QuestionVersion = require('../models/QuestionVersion');
+const prisma = require('../config/prisma');
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 const DIFF_VALUES = ['baja', 'media', 'alta'];
@@ -13,8 +11,6 @@ const buildError = (message, status = 400) => {
   return error;
 };
 
-const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value));
-
 const parseNumber = (value, fallback = null) => {
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = Number(value);
@@ -25,10 +21,7 @@ const sanitizeImages = (images = []) => {
   if (!Array.isArray(images)) return [];
   return images
     .filter((image) => image && image.url)
-    .map((image) => ({
-      url: String(image.url).trim(),
-      caption: String(image.caption || '').trim()
-    }));
+    .map((image) => ({ url: String(image.url).trim(), caption: String(image.caption || '').trim() }));
 };
 
 const sanitizeOptions = (options = []) => {
@@ -39,22 +32,18 @@ const sanitizeOptions = (options = []) => {
       label: String(option.label || '').trim().toUpperCase(),
       text: String(option.text || '').trim(),
       image: option.image?.url
-        ? {
-            url: String(option.image.url).trim(),
-            caption: String(option.image.caption || '').trim()
-          }
+        ? { url: String(option.image.url).trim(), caption: String(option.image.caption || '').trim() }
         : null
     }));
 };
 
+// Maps the incoming API payload to Prisma field names.
+// statement.text → statementText, triParams.a → triParamA, etc.
 const normalizeQuestionPayload = (payload = {}) => {
   const statement = payload.statement || {};
-
   return {
-    statement: {
-      text: String(statement.text || '').trim(),
-      images: sanitizeImages(statement.images)
-    },
+    statementText: String(statement.text || '').trim(),
+    statementImages: sanitizeImages(statement.images),
     latex: String(payload.latex || '').trim(),
     options: sanitizeOptions(payload.options),
     correctAnswer: String(payload.correctAnswer || '').trim().toUpperCase(),
@@ -62,14 +51,12 @@ const normalizeQuestionPayload = (payload = {}) => {
     competencia: String(payload.competencia || '').trim(),
     nivelCognitivo: String(payload.nivelCognitivo || 'comprender').trim().toLowerCase(),
     dificultadCualitativa: String(payload.dificultadCualitativa || '').trim().toLowerCase(),
-    triParams: {
-      a: parseNumber(payload?.triParams?.a, 1),
-      b: parseNumber(payload?.triParams?.b, 0),
-      c: parseNumber(payload?.triParams?.c, 0.2)
-    },
+    triParamA: parseNumber(payload?.triParams?.a, 1),
+    triParamB: parseNumber(payload?.triParams?.b, 0),
+    triParamC: parseNumber(payload?.triParams?.c, 0.2),
     visibility: String(payload.visibility || 'private').trim().toLowerCase(),
     calibrationStatus: String(payload.calibrationStatus || 'experimental').trim().toLowerCase(),
-    caseGroup: payload.caseGroup || null
+    caseGroupId: payload.caseGroup || null
   };
 };
 
@@ -77,9 +64,7 @@ const validateQuestionPayload = (payload, { partial = false } = {}) => {
   const normalized = normalizeQuestionPayload(payload);
 
   if (!partial || payload.statement !== undefined || payload.latex !== undefined) {
-    const hasText = Boolean(normalized.statement.text);
-    const hasLatex = Boolean(normalized.latex);
-    if (!hasText && !hasLatex) {
+    if (!normalized.statementText && !normalized.latex) {
       throw buildError('Debe existir texto o latex en el enunciado', 400);
     }
   }
@@ -88,19 +73,14 @@ const validateQuestionPayload = (payload, { partial = false } = {}) => {
     if (!Array.isArray(normalized.options) || normalized.options.length < 4 || normalized.options.length > 8) {
       throw buildError('La pregunta debe tener entre 4 y 8 opciones', 400);
     }
-
-    const labels = normalized.options.map((option) => option.label);
-    const uniqueLabels = new Set(labels);
-
+    const labels = normalized.options.map((o) => o.label);
     if (labels.some((label) => !OPTION_LABELS.includes(label))) {
       throw buildError('Las etiquetas de opciones deben estar entre A y H', 400);
     }
-
-    if (uniqueLabels.size !== labels.length) {
+    if (new Set(labels).size !== labels.length) {
       throw buildError('No puede haber etiquetas de opcion duplicadas', 400);
     }
-
-    if (normalized.options.some((option) => !option.text)) {
+    if (normalized.options.some((o) => !o.text)) {
       throw buildError('Cada opcion debe tener texto', 400);
     }
   }
@@ -109,7 +89,7 @@ const validateQuestionPayload = (payload, { partial = false } = {}) => {
     if (!OPTION_LABELS.includes(normalized.correctAnswer)) {
       throw buildError('correctAnswer debe estar entre A y H', 400);
     }
-    if (normalized.options.length && !normalized.options.find((option) => option.label === normalized.correctAnswer)) {
+    if (normalized.options.length && !normalized.options.find((o) => o.label === normalized.correctAnswer)) {
       throw buildError('correctAnswer debe existir dentro de las opciones', 400);
     }
   }
@@ -128,196 +108,178 @@ const validateQuestionPayload = (payload, { partial = false } = {}) => {
     }
   }
 
-  if (normalized.triParams.a <= 0 || normalized.triParams.a > 3) {
+  if (normalized.triParamA <= 0 || normalized.triParamA > 3) {
     throw buildError('triParams.a debe estar entre 0.01 y 3', 400);
   }
-  if (normalized.triParams.b < -3 || normalized.triParams.b > 3) {
+  if (normalized.triParamB < -3 || normalized.triParamB > 3) {
     throw buildError('triParams.b debe estar entre -3 y 3', 400);
   }
-  if (normalized.triParams.c < 0 || normalized.triParams.c > 0.5) {
+  if (normalized.triParamC < 0 || normalized.triParamC > 0.5) {
     throw buildError('triParams.c debe estar entre 0 y 0.5', 400);
   }
 
   if (!VISIBILITY_VALUES.includes(normalized.visibility)) {
     throw buildError('visibility invalida', 400);
   }
-
   if (!CALIBRATION_VALUES.includes(normalized.calibrationStatus)) {
     throw buildError('calibrationStatus invalido', 400);
-  }
-
-  if (normalized.caseGroup && !isObjectId(normalized.caseGroup)) {
-    throw buildError('caseGroup invalido', 400);
   }
 
   return normalized;
 };
 
-const buildQuestionSnapshot = (question) => ({
-  statement: question.statement,
-  latex: question.latex,
-  options: question.options,
-  correctAnswer: question.correctAnswer,
-  area: question.area,
-  competencia: question.competencia,
-  nivelCognitivo: question.nivelCognitivo,
-  dificultadCualitativa: question.dificultadCualitativa,
-  triParams: question.triParams,
-  visibility: question.visibility,
-  calibrationStatus: question.calibrationStatus,
-  stats: question.stats,
-  estado: question.estado,
-  caseGroup: question.caseGroup || null
+const QUESTION_INCLUDE = {
+  createdBy: { select: { id: true, name: true, email: true, role: true } },
+  updatedBy: { select: { id: true, name: true, email: true, role: true } },
+  caseGroup: true
+};
+
+// Snapshot for version history — mirrors field names in the DB
+const buildQuestionSnapshot = (q) => ({
+  statementText: q.statementText,
+  statementImages: q.statementImages,
+  latex: q.latex,
+  options: q.options,
+  correctAnswer: q.correctAnswer,
+  area: q.area,
+  competencia: q.competencia,
+  nivelCognitivo: q.nivelCognitivo,
+  dificultadCualitativa: q.dificultadCualitativa,
+  triParamA: q.triParamA,
+  triParamB: q.triParamB,
+  triParamC: q.triParamC,
+  visibility: q.visibility,
+  calibrationStatus: q.calibrationStatus,
+  estado: q.estado,
+  caseGroupId: q.caseGroupId || null
 });
 
-const saveVersion = async ({ question, changedBy, changeType, changeReason = '' }) => {
-  await QuestionVersion.create({
-    question: question._id,
-    versionNumber: question.currentVersion,
-    snapshot: buildQuestionSnapshot(question),
-    changeType,
-    changeReason,
-    changedBy
+const saveVersion = async (question, changedById, changeType, changeReason = '') => {
+  await prisma.questionVersion.create({
+    data: {
+      questionId: question.id,
+      versionNumber: question.currentVersion,
+      snapshot: buildQuestionSnapshot(question),
+      changeType,
+      changeReason,
+      changedById
+    }
   });
 };
 
 const assertQuestionPermission = (question, user) => {
-  const isAdmin = user.role === 'admin';
-  const isOwner = question.metadata?.createdBy?.toString() === String(user.id);
-
-  if (!isAdmin && !isOwner) {
+  if (user.role === 'admin') return;
+  if (question.createdById !== user.id) {
     throw buildError('No tienes permisos para esta pregunta', 403);
   }
 };
 
 const sanitizeSort = (sortParam) => {
-  if (!sortParam) {
-    return { updatedAt: -1 };
-  }
+  const allowed = {
+    updatedAt: true,
+    createdAt: true,
+    area: true,
+    competencia: true,
+    dificultadCualitativa: true,
+    triParamB: true,
+    calibrationStatus: true,
+    visibility: true
+  };
 
-  const allowed = new Set([
-    'updatedAt',
-    'createdAt',
-    'area',
-    'competencia',
-    'dificultadCualitativa',
-    'triParams.b',
-    'calibrationStatus',
-    'visibility'
-  ]);
+  if (!sortParam) return { updatedAt: 'desc' };
 
-  const segments = String(sortParam)
+  const orderBy = {};
+  String(sortParam)
     .split(',')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .forEach((segment) => {
+      const [field, dirRaw] = segment.split(':');
+      if (!allowed[field]) return;
+      orderBy[field] = String(dirRaw || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+    });
 
-  const sort = {};
-  segments.forEach((segment) => {
-    const [field, dirRaw] = segment.split(':');
-    if (!allowed.has(field)) return;
-    const dir = String(dirRaw || 'desc').toLowerCase();
-    sort[field] = dir === 'asc' ? 1 : -1;
-  });
-
-  return Object.keys(sort).length ? sort : { updatedAt: -1 };
+  return Object.keys(orderBy).length ? orderBy : { updatedAt: 'desc' };
 };
+
+// ── CRUD ──────────────────────────────────────────────────────────────────────
 
 const createQuestion = async (payload, user) => {
   const normalized = validateQuestionPayload(payload);
 
-  const question = await Question.create({
-    ...normalized,
-    metadata: {
-      createdBy: user.id,
-      updatedBy: user.id
+  const question = await prisma.question.create({
+    data: {
+      ...normalized,
+      schoolId: user.schoolId,
+      estado: 'borrador',
+      currentVersion: 1,
+      createdById: user.id,
+      updatedById: user.id
     },
-    estado: 'borrador',
-    currentVersion: 1
+    include: QUESTION_INCLUDE
   });
 
-  await saveVersion({ question, changedBy: user.id, changeType: 'create' });
+  await saveVersion(question, user.id, 'create');
 
-  return Question.findById(question._id)
-    .populate('metadata.createdBy', 'name email role')
-    .populate('metadata.updatedBy', 'name email role')
-    .lean();
+  return question;
 };
 
 const listQuestions = async (query, user) => {
-  const filters = [];
+  const where = { schoolId: user.schoolId };
 
-  if (query.area) filters.push({ area: query.area });
-  if (query.competencia) filters.push({ competencia: query.competencia });
-  if (query.dificultadCualitativa) filters.push({ dificultadCualitativa: query.dificultadCualitativa });
-  if (query.calibrationStatus) filters.push({ calibrationStatus: query.calibrationStatus });
-  if (query.visibility) filters.push({ visibility: query.visibility });
-  if (query.estado) filters.push({ estado: query.estado });
-  if (query.nivelCognitivo) filters.push({ nivelCognitivo: query.nivelCognitivo });
-
-  if (query.creator) {
-    if (!isObjectId(query.creator)) throw buildError('creator invalido', 400);
-    filters.push({ 'metadata.createdBy': query.creator });
-  }
+  if (query.area) where.area = query.area;
+  if (query.competencia) where.competencia = query.competencia;
+  if (query.dificultadCualitativa) where.dificultadCualitativa = query.dificultadCualitativa;
+  if (query.calibrationStatus) where.calibrationStatus = query.calibrationStatus;
+  if (query.visibility) where.visibility = query.visibility;
+  if (query.estado) where.estado = query.estado;
+  if (query.nivelCognitivo) where.nivelCognitivo = query.nivelCognitivo;
+  if (query.creator) where.createdById = query.creator;
 
   const bMin = parseNumber(query.bMin, null);
   const bMax = parseNumber(query.bMax, null);
   if (bMin !== null || bMax !== null) {
-    filters.push({
-      'triParams.b': {
-        ...(bMin !== null ? { $gte: bMin } : {}),
-        ...(bMax !== null ? { $lte: bMax } : {})
-      }
-    });
+    where.triParamB = {
+      ...(bMin !== null ? { gte: bMin } : {}),
+      ...(bMax !== null ? { lte: bMax } : {})
+    };
   }
 
   if (user.role !== 'admin') {
-    filters.push({
-      $or: [
-        { 'metadata.createdBy': user.id },
-        { visibility: { $in: ['institutional', 'national'] } }
-      ]
-    });
+    where.OR = [
+      { createdById: user.id },
+      { visibility: { in: ['institutional', 'national'] } }
+    ];
   }
 
-  const where = filters.length ? { $and: filters } : {};
   const page = Math.max(parseInt(query.page || '1', 10), 1);
   const limit = Math.min(Math.max(parseInt(query.limit || '20', 10), 1), 100);
   const skip = (page - 1) * limit;
-  const sort = sanitizeSort(query.sort);
+  const orderBy = sanitizeSort(query.sort);
 
   const [total, questions] = await Promise.all([
-    Question.countDocuments(where),
-    Question.find(where)
-      .populate('metadata.createdBy', 'name email role')
-      .sort(sort)
-      .skip(skip)
-      .limit(limit)
-      .lean()
+    prisma.question.count({ where }),
+    prisma.question.findMany({
+      where,
+      include: QUESTION_INCLUDE,
+      orderBy,
+      skip,
+      take: limit
+    })
   ]);
 
   return {
     items: questions,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    }
+    pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
   };
 };
 
 const getQuestionById = async (id, user) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const question = await Question.findById(id)
-    .populate('metadata.createdBy', 'name email role')
-    .populate('metadata.updatedBy', 'name email role')
-    .populate('caseGroup')
-    .lean();
+  const question = await prisma.question.findUnique({ where: { id }, include: QUESTION_INCLUDE });
 
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
-  const isOwner = question.metadata?.createdBy?._id?.toString() === String(user.id);
+  const isOwner = question.createdById === user.id;
   const visibleForRole = ['institutional', 'national'].includes(question.visibility);
   if (user.role !== 'admin' && !isOwner && !visibleForRole) {
     throw buildError('No tienes permisos para ver esta pregunta', 403);
@@ -327,15 +289,16 @@ const getQuestionById = async (id, user) => {
 };
 
 const updateQuestion = async (id, payload, user) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const question = await Question.findById(id);
+  const question = await prisma.question.findUnique({ where: { id } });
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
   assertQuestionPermission(question, user);
 
   const mergedPayload = {
-    statement: payload.statement !== undefined ? payload.statement : question.statement,
+    statement: {
+      text: payload.statement?.text !== undefined ? payload.statement.text : question.statementText,
+      images: payload.statement?.images !== undefined ? payload.statement.images : question.statementImages
+    },
     latex: payload.latex !== undefined ? payload.latex : question.latex,
     options: payload.options !== undefined ? payload.options : question.options,
     correctAnswer: payload.correctAnswer !== undefined ? payload.correctAnswer : question.correctAnswer,
@@ -343,85 +306,82 @@ const updateQuestion = async (id, payload, user) => {
     competencia: payload.competencia !== undefined ? payload.competencia : question.competencia,
     nivelCognitivo: payload.nivelCognitivo !== undefined ? payload.nivelCognitivo : question.nivelCognitivo,
     dificultadCualitativa: payload.dificultadCualitativa !== undefined ? payload.dificultadCualitativa : question.dificultadCualitativa,
-    triParams: payload.triParams !== undefined ? payload.triParams : question.triParams,
+    triParams: {
+      a: payload.triParams?.a !== undefined ? payload.triParams.a : question.triParamA,
+      b: payload.triParams?.b !== undefined ? payload.triParams.b : question.triParamB,
+      c: payload.triParams?.c !== undefined ? payload.triParams.c : question.triParamC
+    },
     visibility: payload.visibility !== undefined ? payload.visibility : question.visibility,
     calibrationStatus: payload.calibrationStatus !== undefined ? payload.calibrationStatus : question.calibrationStatus,
-    caseGroup: payload.caseGroup !== undefined ? payload.caseGroup : question.caseGroup
+    caseGroup: payload.caseGroup !== undefined ? payload.caseGroup : question.caseGroupId
   };
 
   const normalized = validateQuestionPayload(mergedPayload);
+  const newVersion = question.currentVersion + 1;
 
-  Object.assign(question, normalized);
-  question.metadata.updatedBy = user.id;
-  question.currentVersion += 1;
+  const updated = await prisma.question.update({
+    where: { id },
+    data: { ...normalized, updatedById: user.id, currentVersion: newVersion },
+    include: QUESTION_INCLUDE
+  });
 
-  await question.save();
-  await saveVersion({ question, changedBy: user.id, changeType: 'update', changeReason: payload.changeReason || '' });
+  await saveVersion(updated, user.id, 'update', payload.changeReason || '');
 
-  return Question.findById(question._id)
-    .populate('metadata.createdBy', 'name email role')
-    .populate('metadata.updatedBy', 'name email role')
-    .lean();
+  return updated;
 };
 
 const deleteQuestion = async (id, user) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const question = await Question.findById(id);
+  const question = await prisma.question.findUnique({ where: { id } });
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
   assertQuestionPermission(question, user);
 
-  await Promise.all([
-    QuestionVersion.deleteMany({ question: question._id }),
-    Question.findByIdAndDelete(question._id)
+  await prisma.$transaction([
+    prisma.questionVersion.deleteMany({ where: { questionId: id } }),
+    prisma.question.delete({ where: { id } })
   ]);
 };
 
 const publishQuestion = async (id, user) => {
-  if (!isObjectId(id)) throw buildError('id invalido', 400);
-
-  const question = await Question.findById(id);
+  const question = await prisma.question.findUnique({ where: { id } });
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
   assertQuestionPermission(question, user);
 
-  question.estado = 'publicada';
-  if (question.visibility === 'private') {
-    question.visibility = 'institutional';
-  }
-  question.metadata.updatedBy = user.id;
-  question.currentVersion += 1;
+  const newVersion = question.currentVersion + 1;
+  const updated = await prisma.question.update({
+    where: { id },
+    data: {
+      estado: 'publicada',
+      visibility: question.visibility === 'private' ? 'institutional' : question.visibility,
+      updatedById: user.id,
+      currentVersion: newVersion
+    },
+    include: QUESTION_INCLUDE
+  });
 
-  await question.save();
-  await saveVersion({ question, changedBy: user.id, changeType: 'publish' });
+  await saveVersion(updated, user.id, 'publish');
 
-  return Question.findById(question._id)
-    .populate('metadata.createdBy', 'name email role')
-    .populate('metadata.updatedBy', 'name email role')
-    .lean();
+  return updated;
 };
 
 const getQuestionVersions = async (questionId, user) => {
-  if (!isObjectId(questionId)) throw buildError('id invalido', 400);
-
-  const question = await Question.findById(questionId);
+  const question = await prisma.question.findUnique({ where: { id: questionId } });
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
   assertQuestionPermission(question, user);
 
-  return QuestionVersion.find({ question: questionId })
-    .populate('changedBy', 'name email role')
-    .sort({ versionNumber: -1 })
-    .lean();
+  return prisma.questionVersion.findMany({
+    where: { questionId },
+    include: { changedBy: { select: { id: true, name: true, email: true, role: true } } },
+    orderBy: { versionNumber: 'desc' }
+  });
 };
 
 const restoreQuestionVersion = async ({ questionId, versionId, user }) => {
-  if (!isObjectId(questionId) || !isObjectId(versionId)) throw buildError('id invalido', 400);
-
   const [question, version] = await Promise.all([
-    Question.findById(questionId),
-    QuestionVersion.findOne({ _id: versionId, question: questionId })
+    prisma.question.findUnique({ where: { id: questionId } }),
+    prisma.questionVersion.findFirst({ where: { id: versionId, questionId } })
   ]);
 
   if (!question) throw buildError('Pregunta no encontrada', 404);
@@ -429,24 +389,38 @@ const restoreQuestionVersion = async ({ questionId, versionId, user }) => {
 
   assertQuestionPermission(question, user);
 
-  const normalized = validateQuestionPayload(version.snapshot);
-
-  Object.assign(question, normalized);
-  question.metadata.updatedBy = user.id;
-  question.currentVersion += 1;
-
-  await question.save();
-  await saveVersion({
-    question,
-    changedBy: user.id,
-    changeType: 'restore',
-    changeReason: `Restaurada desde version ${version.versionNumber}`
+  const snap = version.snapshot;
+  const normalized = validateQuestionPayload({
+    statement: { text: snap.statementText, images: snap.statementImages },
+    latex: snap.latex,
+    options: snap.options,
+    correctAnswer: snap.correctAnswer,
+    area: snap.area,
+    competencia: snap.competencia,
+    nivelCognitivo: snap.nivelCognitivo,
+    dificultadCualitativa: snap.dificultadCualitativa,
+    triParams: { a: snap.triParamA, b: snap.triParamB, c: snap.triParamC },
+    visibility: snap.visibility,
+    calibrationStatus: snap.calibrationStatus,
+    caseGroup: snap.caseGroupId
   });
 
-  return Question.findById(question._id)
-    .populate('metadata.createdBy', 'name email role')
-    .populate('metadata.updatedBy', 'name email role')
-    .lean();
+  const newVersion = question.currentVersion + 1;
+
+  const updated = await prisma.question.update({
+    where: { id: questionId },
+    data: { ...normalized, updatedById: user.id, currentVersion: newVersion },
+    include: QUESTION_INCLUDE
+  });
+
+  await saveVersion(
+    updated,
+    user.id,
+    'restore',
+    `Restaurada desde version ${version.versionNumber}`
+  );
+
+  return updated;
 };
 
 module.exports = {

@@ -5,6 +5,26 @@ const omrCoordinates = require('../config/omrCoordinates.json');
 const { VALID_OPTIONS } = require('../validators/physicalSimulacroValidators');
 
 const LOW_CONFIDENCE_THRESHOLD = 0.65;
+const MARK_DENSITY_THRESHOLD = 0.5;
+
+// Converts mm coordinates from omrCoordinates.json to pixels at a given DPI.
+// Assumes 5 options (A–E) per question, laid out left-to-right with bubble.spacingX between them.
+// Questions fill column 0 first (rows 1–questionsPerColumn), then col 1, then col 2.
+const computeExpectedPixelCoords = (questionNumber, optionIndex, dpi = 200) => {
+  const mmToPx = (mm) => Math.round((mm * dpi) / 25.4);
+  const { questionsPerColumn, columns, gridOrigin, bubble, margins, pageWidth } = omrCoordinates;
+  const colWidth = (pageWidth - margins.left - margins.right) / columns;
+  const colIndex = Math.floor((questionNumber - 1) / questionsPerColumn);
+  const rowIndex = (questionNumber - 1) % questionsPerColumn;
+  const colOriginX = gridOrigin.x + colIndex * colWidth;
+  const x = mmToPx(colOriginX + optionIndex * bubble.spacingX + bubble.diameter / 2);
+  const y = mmToPx(gridOrigin.y + rowIndex * bubble.spacingY + bubble.diameter / 2);
+  return { x, y };
+};
+
+const omrDebug = (...args) => {
+  if (process.env.DEBUG_OMR === 'true') console.log('[OMR_DEBUG]', ...args);
+};
 
 const parseQrPayload = (payload) => {
   if (!payload) return null;
@@ -38,34 +58,56 @@ const normalizeAnswers = (answers = []) => {
     .filter((row) => Number.isInteger(row.questionNumber) && row.questionNumber > 0);
 };
 
-const detectBubblesFromCoordinateMatrix = ({ bubbleMatrix, totalQuestions }) => {
-  if (!Array.isArray(bubbleMatrix)) return [];
+const detectBubblesFromCoordinateMatrix = ({ bubbleMatrix, totalQuestions, dpi = 200 }) => {
+  if (!Array.isArray(bubbleMatrix)) {
+    omrDebug(`bubbleMatrix is not an array (got ${typeof bubbleMatrix}) — returning empty`);
+    return [];
+  }
+
+  omrDebug(`--- detectBubblesFromCoordinateMatrix: totalQuestions=${totalQuestions} matrixRows=${bubbleMatrix.length} dpi=${dpi} markThreshold=${MARK_DENSITY_THRESHOLD} ---`);
 
   const parsed = [];
+  let missingRows = 0;
+  let markedCount = 0;
 
   for (let questionNumber = 1; questionNumber <= totalQuestions; questionNumber += 1) {
     const row = bubbleMatrix.find((item) => Number(item.questionNumber) === questionNumber);
+
     if (!row || !Array.isArray(row.optionsDensity)) {
+      missingRows += 1;
+      if (process.env.DEBUG_OMR === 'true' && missingRows <= 5) {
+        omrDebug(`  Q${questionNumber}: NO ROW in bubbleMatrix (missingRows so far: ${missingRows})`);
+      }
       parsed.push({ questionNumber, markedOption: null, confidence: 0 });
       continue;
     }
 
-    const sorted = row.optionsDensity
-      .map((density, index) => ({ option: String.fromCharCode(65 + index), density: Number(density) || 0 }))
-      .sort((a, b) => b.density - a.density);
+    const options = row.optionsDensity.map((density, index) => {
+      const label = String.fromCharCode(65 + index);
+      const coords = computeExpectedPixelCoords(questionNumber, index, dpi);
+      return { option: label, density: Number(density) || 0, coords };
+    });
 
-    const top = sorted[0] || { option: null, density: 0 };
+    const sorted = [...options].sort((a, b) => b.density - a.density);
+    const top = sorted[0] || { option: null, density: 0, coords: { x: 0, y: 0 } };
     const second = sorted[1] || { density: 0 };
 
     const confidence = Math.max(0, Math.min(1, top.density - second.density));
-    const markedOption = top.density > 0.5 ? top.option : null;
+    const markedOption = top.density > MARK_DENSITY_THRESHOLD ? top.option : null;
+    if (markedOption) markedCount += 1;
 
-    parsed.push({
-      questionNumber,
-      markedOption,
-      confidence
-    });
+    if (process.env.DEBUG_OMR === 'true') {
+      const densityBar = options.map((o) => `${o.option}=${o.density.toFixed(3)}@(${o.coords.x},${o.coords.y}px)`).join('  ');
+      const verdict = markedOption
+        ? `→ MARKED ${markedOption} (density ${top.density.toFixed(3)} > ${MARK_DENSITY_THRESHOLD}, conf=${confidence.toFixed(3)})`
+        : `→ UNMARKED (top=${top.option} density=${top.density.toFixed(3)} ≤ ${MARK_DENSITY_THRESHOLD})`;
+      omrDebug(`  Q${String(questionNumber).padStart(3)}: ${densityBar}  ${verdict}`);
+    }
+
+    parsed.push({ questionNumber, markedOption, confidence });
   }
+
+  omrDebug(`--- result: ${markedCount}/${totalQuestions} marked, ${missingRows} rows missing from matrix ---`);
 
   return parsed;
 };
@@ -82,9 +124,12 @@ const parsePDF = async (filePath, options = {}) => {
 
   await fs.access(absolutePath);
 
-  const { pagePayloads = null, totalQuestions = 147 } = options;
+  const { pagePayloads = null, totalQuestions = 147, dpi = 200 } = options;
+
+  omrDebug(`parsePDF called: file=${path.basename(absolutePath)} totalQuestions=${totalQuestions} dpi=${dpi} pagePayloads=${pagePayloads ? pagePayloads.length : 'null'}`);
 
   if (!pagePayloads || !Array.isArray(pagePayloads) || pagePayloads.length === 0) {
+    omrDebug('FAIL: pagePayloads missing or empty — throwing 422');
     // Production contract: OCR extraction stage must provide per-page payloads.
     // Keep service strict to avoid fake parsing in production.
     throw new ApiError(
@@ -97,20 +142,29 @@ const parsePDF = async (filePath, options = {}) => {
     const qr = parseQrPayload(page.qrToken || page.qrPayload);
 
     const byAnswers = normalizeAnswers(page.answers);
+    omrDebug(`  page ${index + 1}: byAnswers=${byAnswers.length} entries, bubbleMatrix=${Array.isArray(page.bubbleMatrix) ? page.bubbleMatrix.length : 'null'} rows`);
+
     const byMatrix = detectBubblesFromCoordinateMatrix({
       bubbleMatrix: page.bubbleMatrix,
-      totalQuestions
+      totalQuestions,
+      dpi
     });
 
+    const source = byAnswers.length ? 'answers' : 'matrix';
     const mergedAnswers = byAnswers.length ? byAnswers : byMatrix;
+    const markedInMerged = mergedAnswers.filter((a) => a.markedOption !== null).length;
     const avgConfidence = mergedAnswers.length
       ? mergedAnswers.reduce((acc, row) => acc + (row.confidence || 0), 0) / mergedAnswers.length
       : 0;
+
+    omrDebug(`  page ${index + 1}: source=${source} mergedAnswers=${mergedAnswers.length} marked=${markedInMerged} avgConf=${avgConfidence.toFixed(3)}`);
 
     const flags = [];
     if (!qr) flags.push('MISSING_QR');
     if (!mergedAnswers.length) flags.push('NO_BUBBLE_DATA');
     if (avgConfidence < LOW_CONFIDENCE_THRESHOLD) flags.push('LOW_CONFIDENCE');
+
+    omrDebug(`  page ${index + 1}: qr=${qr ? JSON.stringify(qr) : 'MISSING'} flags=${JSON.stringify(flags)}`);
 
     return {
       pageNumber: index + 1,
@@ -194,5 +248,8 @@ module.exports = {
   parsePDF,
   evaluateAnswerSheet,
   parseQrPayload,
-  LOW_CONFIDENCE_THRESHOLD
+  detectBubblesFromCoordinateMatrix,
+  computeExpectedPixelCoords,
+  LOW_CONFIDENCE_THRESHOLD,
+  MARK_DENSITY_THRESHOLD
 };

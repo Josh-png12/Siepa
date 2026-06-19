@@ -1,7 +1,7 @@
-const AuditLog = require('../models/AuditLog');
+const prisma = require('../config/prisma');
 
 const logAudit = async ({
-  institutionId = 'default',
+  schoolId,
   userId,
   action,
   entityType,
@@ -11,18 +11,18 @@ const logAudit = async ({
 }) => {
   if (!userId || !action || !entityType || !entityId) return null;
 
-  return AuditLog.create({
-    institutionId,
-    userId,
-    action,
-    entityType,
-    entityId: String(entityId),
-    courseId,
-    metadata,
-    timestamp: new Date()
+  return prisma.auditLog.create({
+    data: {
+      schoolId: schoolId || 'default',
+      userId,
+      action,
+      entityType,
+      entityId: String(entityId),
+      courseId: courseId || null,
+      metadata,
+      timestamp: new Date()
+    }
   });
 };
 
-module.exports = {
-  logAudit
-};
+module.exports = { logAudit };

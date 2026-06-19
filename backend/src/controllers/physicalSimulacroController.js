@@ -20,7 +20,28 @@ const getStudentPhysicalEvaluation = asyncHandler(async (req, res) => {
   throw new ApiError(501, 'NotImplemented');
 });
 
+const processScan = asyncHandler(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'ValidationError', ['scanFile is required']);
+
+  const simulacroId = req.params.id;
+
+  // pagePayloadsByFileName=null → processUploadedFileJob will auto-detect via bubbleDetectionService
+  const result = await service.uploadTeacherOcrSheets({
+    user: req.user,
+    simulacroId,
+    files: [req.file],
+    pagePayloadsByFileName: null
+  });
+
+  return successResponse(res, {
+    statusCode: 200,
+    message: 'Scan queued for processing',
+    data: result
+  });
+});
+
 module.exports = {
   createPhysicalSimulacroDraft,
-  getStudentPhysicalEvaluation
+  getStudentPhysicalEvaluation,
+  processScan
 };

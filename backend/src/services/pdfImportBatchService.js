@@ -2,8 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 const ApiError = require('../utils/ApiError');
-const PdfImportBatch = require('../models/PdfImportBatch');
-const Question = require('../models/Question');
+const prisma = require('../config/prisma');
 const { logAudit } = require('./auditLogService');
 const { ocrPdfPages } = require('./pdfOcrService');
 
@@ -47,7 +46,7 @@ const normalizeLine = (line) => String(line || '').replace(/[ \t]{2,}/g, ' ').tr
 
 const normalizeText = (text) => String(text || '')
   .replace(/\r\n?/g, '\n')
-  .replace(/\u00A0/g, ' ')
+  .replace(/ /g, ' ')
   .replace(/[•◦▪‣·●○■◆►]/g, '-')
   .replace(/[ \t]+\n/g, '\n')
   .replace(/[ \t]{2,}/g, ' ')
@@ -55,12 +54,11 @@ const normalizeText = (text) => String(text || '')
 
 const normalizeForMatch = (text) => normalizeText(text)
   .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[̀-ͯ]/g, '')
   .toUpperCase();
 
 const safeName = (name, fallback) => String(name || fallback).replace(/[^a-zA-Z0-9._-]/g, '_');
 const getAuditPrefix = (user) => (user?.role === 'admin' ? 'admin' : 'teacher');
-const toInstitutionId = (value) => String(value || 'default').trim() || 'default';
 
 const ensurePdfParse = () => {
   try {
@@ -446,13 +444,6 @@ const buildPreviewStats = (questions, blocks) => {
   };
 };
 
-const quickQuestionCount = (text) => {
-  const normalized = String(text || '');
-  const starts = [...normalized.matchAll(/(?:^|\n)\s*(\d{1,3})\s*[).:-]\s+/g)].length;
-  const labels = [...normalized.matchAll(/(?:^|\n)\s*Pregunta\s+\d+/gi)].length;
-  return starts + labels;
-};
-
 const parsePreviewFromPages = async ({
   pagesInput,
   answersPdfPath = '',
@@ -621,16 +612,16 @@ const parseMultiAreaPDF = async (questionsPdfPath, answersPdfPath = '', hints = 
   return preview;
 };
 
-const ensureBatchAccess = ({ batch, user, institutionId }) => {
+const ensureBatchAccess = ({ batch, user, schoolId }) => {
   if (!batch) throw new ApiError(404, 'NotFound', ['Batch no encontrado']);
-  if (batch.institutionId !== institutionId) throw new ApiError(403, 'Forbidden', ['Batch fuera de alcance institucional']);
-  if (user.role !== 'admin' && String(batch.createdBy) !== String(user.id)) {
+  if (batch.schoolId !== schoolId) throw new ApiError(403, 'Forbidden', ['Batch fuera de alcance institucional']);
+  if (user.role !== 'admin' && batch.createdById !== user.id) {
     throw new ApiError(403, 'Forbidden', ['No tienes permisos sobre este batch']);
   }
 };
 
 const createPreviewBatch = async ({ user, files, payload }) => {
-  const institutionId = toInstitutionId(user.institutionId);
+  const schoolId = user.schoolId;
   const questionsFile = files?.questionsPdf?.[0];
   const answersFile = files?.answersPdf?.[0] || null;
 
@@ -638,20 +629,20 @@ const createPreviewBatch = async ({ user, files, payload }) => {
     throw new ApiError(400, 'ValidationError', ['questionsPdf es requerido']);
   }
 
-  const created = await PdfImportBatch.create({
-    institutionId,
-    createdBy: user.id,
-    sessionName: String(payload.sessionName || '').trim(),
-    grade: String(payload.grade || '').trim(),
-    year: String(payload.year || '').trim(),
-    status: 'preview',
-    files: {
+  const created = await prisma.pdfImportBatch.create({
+    data: {
+      schoolId,
+      createdById: user.id,
+      sessionName: String(payload.sessionName || '').trim(),
+      grade: String(payload.grade || '').trim(),
+      year: String(payload.year || '').trim(),
+      status: 'preview',
       questionsPdfPath: '',
       answersPdfPath: ''
     }
   });
 
-  const baseDir = path.join(process.cwd(), 'uploads', 'tmp', 'pdf-import', String(created._id));
+  const baseDir = path.join(process.cwd(), 'uploads', 'tmp', 'pdf-import', String(created.id));
   await fs.mkdir(baseDir, { recursive: true });
 
   const questionsPath = path.join(baseDir, safeName(questionsFile?.originalname, 'questions.pdf'));
@@ -663,33 +654,34 @@ const createPreviewBatch = async ({ user, files, payload }) => {
     await fs.writeFile(answersPath, answersFile.buffer);
   }
 
-  created.files.questionsPdfPath = questionsPath;
-  created.files.answersPdfPath = answersPath;
+  await prisma.pdfImportBatch.update({
+    where: { id: created.id },
+    data: { questionsPdfPath: questionsPath, answersPdfPath: answersPath }
+  });
 
   try {
-    await created.save();
     const { enqueueOcrJob } = require('../jobs/ocrQueue');
     const jobId = enqueueOcrJob({
-      batchId: String(created._id),
-      userId: String(user.id),
-      institutionId,
+      batchId: created.id,
+      userId: user.id,
+      schoolId,
       pdfPath: questionsPath,
       answersPdfPath: answersPath,
       config: payload || {}
     });
 
     await logAudit({
-      institutionId,
+      schoolId,
       userId: user.id,
       action: `${getAuditPrefix(user)}.pdfImport.ocrQueued`,
       entityType: 'PdfImportBatch',
-      entityId: created._id,
+      entityId: created.id,
       metadata: { jobId }
     });
 
     return {
       jobId,
-      batchId: created._id,
+      batchId: created.id,
       status: 'queued',
       progress: {
         currentPage: 0,
@@ -698,9 +690,10 @@ const createPreviewBatch = async ({ user, files, payload }) => {
       }
     };
   } catch (error) {
-    created.status = 'failed';
-    created.errorMessage = error.message || 'No se pudo parsear el PDF';
-    await created.save();
+    await prisma.pdfImportBatch.update({
+      where: { id: created.id },
+      data: { status: 'failed', errorMessage: error.message || 'No se pudo parsear el PDF' }
+    });
     throw error;
   }
 };
@@ -710,9 +703,9 @@ const getPreviewJobStatus = async ({ user, jobId }) => {
   return getOcrJobStatus({
     jobId,
     requester: {
-      id: String(user.id),
+      id: user.id,
       role: user.role,
-      institutionId: toInstitutionId(user.institutionId)
+      schoolId: user.schoolId
     }
   });
 };
@@ -722,20 +715,20 @@ const cancelPreviewJob = async ({ user, jobId }) => {
   return cancelOcrJob({
     jobId,
     requester: {
-      id: String(user.id),
+      id: user.id,
       role: user.role,
-      institutionId: toInstitutionId(user.institutionId)
+      schoolId: user.schoolId
     }
   });
 };
 
 const getPreviewBatch = async ({ user, batchId }) => {
-  const institutionId = toInstitutionId(user.institutionId);
-  const batch = await PdfImportBatch.findById(batchId).lean();
-  ensureBatchAccess({ batch, user, institutionId });
+  const schoolId = user.schoolId;
+  const batch = await prisma.pdfImportBatch.findUnique({ where: { id: batchId } });
+  ensureBatchAccess({ batch, user, schoolId });
 
   return {
-    batchId: batch._id,
+    batchId: batch.id,
     status: batch.status,
     ocrUsed: Boolean(batch.ocrUsed),
     sessionName: batch.sessionName,
@@ -783,107 +776,112 @@ const ensureOptionArray = (options) => {
   return normalized.slice(0, 5);
 };
 
+const VALID_NIVELES = ['recordar', 'comprender', 'aplicar', 'analizar', 'evaluar', 'crear'];
+
 const confirmPreviewBatch = async ({ user, payload }) => {
-  const institutionId = toInstitutionId(user.institutionId);
+  const schoolId = user.schoolId;
   const batchId = String(payload.batchId || '').trim();
   if (!batchId) throw new ApiError(400, 'ValidationError', ['batchId es requerido']);
 
-  const batch = await PdfImportBatch.findById(batchId);
-  ensureBatchAccess({ batch, user, institutionId });
+  const batch = await prisma.pdfImportBatch.findUnique({ where: { id: batchId } });
+  ensureBatchAccess({ batch, user, schoolId });
 
   if (batch.status !== 'preview') {
     throw new ApiError(409, 'InvalidState', ['El batch no está en estado preview']);
   }
-  if (!String(batch.files?.questionsPdfPath || '').trim()) {
-    throw new ApiError(400, 'ValidationError', ['files.questionsPdfPath es requerido para confirmar importación']);
+  if (!String(batch.questionsPdfPath || '').trim()) {
+    throw new ApiError(400, 'ValidationError', ['questionsPdfPath es requerido para confirmar importación']);
   }
 
-  const operations = [];
+  const toCreate = [];
   const skipped = [];
-  const questionIds = [];
 
-  (batch.detectedQuestions || []).forEach((item) => {
+  (Array.isArray(batch.detectedQuestions) ? batch.detectedQuestions : []).forEach((item) => {
     const override = getOverride(payload.overrides, item.number);
     const area = String(override.area || item.areaGuess || 'Sin clasificar').trim() || 'Sin clasificar';
     const competencia = String(override.competencia || item.competenciaGuess || 'Sin clasificar').trim() || 'Sin clasificar';
-    const nivel = String(override.nivelCognitivo || item.nivelGuess || 'comprender').trim().toLowerCase() || 'comprender';
+    const nivelRaw = String(override.nivelCognitivo || item.nivelGuess || 'comprender').trim().toLowerCase();
+    const nivelCognitivo = VALID_NIVELES.includes(nivelRaw) ? nivelRaw : 'comprender';
     const options = ensureOptionArray(item.options || []);
+
     if (!String(item.text || '').trim()) {
       skipped.push({ number: item.number, reason: 'NO_STATEMENT' });
       return;
     }
 
-    const answer = String(override.answerKey || item.answerGuess || options[0]?.label || 'A').trim().toUpperCase();
-    const safeAnswer = options.some((opt) => opt.label === answer) ? answer : options[0]?.label || 'A';
+    const answerRaw = String(override.answerKey || item.answerGuess || options[0]?.label || 'A').trim().toUpperCase();
+    const correctAnswer = options.some((opt) => opt.label === answerRaw) ? answerRaw : options[0]?.label || 'A';
 
-    const insertDoc = {
-      institutionId,
-      statement: {
-        text: String(item.text || '').trim(),
-        images: []
-      },
+    toCreate.push({
+      schoolId,
+      statementText: String(item.text || '').trim(),
+      statementImages: [],
       latex: '',
       options,
-      correctAnswer: safeAnswer,
+      correctAnswer,
       area,
       competencia,
-      nivelCognitivo: ['recordar', 'comprender', 'aplicar', 'analizar', 'evaluar', 'crear'].includes(nivel) ? nivel : 'comprender',
+      nivelCognitivo,
       dificultadCualitativa: 'media',
-      triParams: { a: 1, b: 0, c: 0.2 },
+      triParamA: 1,
+      triParamB: 0,
+      triParamC: 0.2,
       visibility: 'private',
       calibrationStatus: 'experimental',
       estado: 'borrador',
-      source: {
-        type: 'pdf',
-        pdfId: batch._id,
-        sessionName: batch.sessionName || '',
-        pageStart: item.source?.pageStart || item.page || null,
-        pageEnd: item.source?.pageEnd || item.page || null,
-        blockLabel: item.source?.blockLabel || area
-      },
-      importBatchId: batch._id,
-      metadata: {
-        createdBy: user.id,
-        updatedBy: user.id
-      },
+      sourceType: 'pdf',
+      sourcePdfId: batch.id,
+      sourceSessionName: batch.sessionName || '',
+      sourcePageStart: item.source?.pageStart || item.page || null,
+      sourcePageEnd: item.source?.pageEnd || item.page || null,
+      sourceBlockLabel: item.source?.blockLabel || area,
+      importBatchId: batch.id,
+      createdById: user.id,
+      updatedById: user.id,
       currentVersion: 1
-    };
-
-    operations.push({ insertOne: { document: insertDoc } });
+    });
   });
 
-  if (!operations.length) {
-    batch.status = 'failed';
-    batch.errorMessage = 'No hay preguntas válidas para importar';
-    await batch.save();
+  if (!toCreate.length) {
+    await prisma.pdfImportBatch.update({
+      where: { id: batchId },
+      data: { status: 'failed', errorMessage: 'No hay preguntas válidas para importar' }
+    });
     throw new ApiError(400, 'ValidationError', ['No hay preguntas válidas para importar']);
   }
 
-  const writeResult = await Question.bulkWrite(operations, { ordered: false });
-  Object.values(writeResult.insertedIds || {}).forEach((id) => questionIds.push(id));
+  // Sequential creates replace bulkWrite — tolerate individual failures
+  const createdIds = [];
+  for (const data of toCreate) {
+    try {
+      const q = await prisma.question.create({ data });
+      createdIds.push(q.id);
+    } catch (_error) {
+      // skip individual failures; final count reflects reality
+    }
+  }
 
-  batch.status = 'imported';
-  await batch.save();
+  await prisma.pdfImportBatch.update({ where: { id: batchId }, data: { status: 'imported' } });
 
   await logAudit({
-    institutionId,
+    schoolId,
     userId: user.id,
     action: `${getAuditPrefix(user)}.pdfImport.confirm`,
     entityType: 'PdfImportBatch',
-    entityId: batch._id,
+    entityId: batchId,
     metadata: {
-      createdCount: Number(writeResult.insertedCount || 0),
+      createdCount: createdIds.length,
       skippedCount: skipped.length
     }
   });
 
   return {
-    batchId: batch._id,
-    status: batch.status,
-    createdCount: Number(writeResult.insertedCount || 0),
+    batchId,
+    status: 'imported',
+    createdCount: createdIds.length,
     skippedCount: skipped.length,
     skipped,
-    questionIds
+    questionIds: createdIds
   };
 };
 

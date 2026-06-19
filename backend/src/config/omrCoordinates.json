@@ -3,6 +3,8 @@
   "pageHeight": 279,
   "columns": 3,
   "questionsPerColumn": 49,
+  "columnSpacing": 60,
+  "numOptions": 5,
   "bubble": {
     "diameter": 4,
     "spacingX": 6,

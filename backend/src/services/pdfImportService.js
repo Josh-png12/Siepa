@@ -1,10 +1,7 @@
 const fs = require('fs/promises');
 const path = require('path');
-const mongoose = require('mongoose');
 const ApiError = require('../utils/ApiError');
-const PdfImportJob = require('../models/PdfImportJob');
-const Question = require('../models/Question');
-const SystemConfig = require('../models/SystemConfig');
+const prisma = require('../config/prisma');
 const { logAudit } = require('./auditLogService');
 const pdfImportQueueService = require('./pdfImportQueueService');
 const pdfExtractService = require('./pdfExtractService');
@@ -22,39 +19,34 @@ const DEFAULT_QUESTION_VALUES = {
   dificultadCualitativa: 'media'
 };
 
-const ensureObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value));
-
-const toInstitutionId = (value) => String(value || 'default').trim() || 'default';
-
 const safeFileName = (name) => String(name || 'source.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-
 const resolveJobDir = (jobId) => path.join(process.cwd(), 'uploads', 'pdf-import', String(jobId));
 
 const getPublicJob = (job) => ({
-  _id: job._id,
-  institutionId: job.institutionId,
-  createdBy: job.createdBy,
+  id: job.id,
+  schoolId: job.schoolId,
+  createdBy: job.createdById,
   status: job.status,
   pages: job.pages,
   isScanned: job.isScanned,
   ocrEngine: job.ocrEngine,
   source: {
-    originalName: job.source?.originalName,
-    mimeType: job.source?.mimeType,
-    size: job.source?.size
+    originalName: job.sourceOriginalName,
+    mimeType: job.sourceMimeType,
+    size: job.sourceSize
   },
-  preview: job.status === 'previewReady' || job.status === 'confirmed' ? job.preview : undefined,
+  preview: (job.status === 'previewReady' || job.status === 'confirmed')
+    ? { questions: job.previewQuestions, warnings: job.previewWarnings, stats: job.previewStats }
+    : undefined,
   errors: job.errors || [],
   createdAt: job.createdAt,
   updatedAt: job.updatedAt
 });
 
-const assertJobAccess = ({ job, user, institutionId }) => {
+const assertJobAccess = ({ job, user, schoolId }) => {
   if (!job) throw new ApiError(404, 'NotFound', ['PDF import job no encontrado']);
-  if (job.institutionId !== institutionId) {
-    throw new ApiError(403, 'Forbidden', ['No autorizado para esta institucion']);
-  }
-  if (user.role !== 'admin' && String(job.createdBy) !== String(user.id)) {
+  if (job.schoolId !== schoolId) throw new ApiError(403, 'Forbidden', ['No autorizado para esta institucion']);
+  if (user.role !== 'admin' && job.createdById !== user.id) {
     throw new ApiError(403, 'Forbidden', ['No autorizado para este job']);
   }
 };
@@ -64,7 +56,8 @@ const buildJobError = (error) => ({
   message: error?.message || 'Unexpected PDF import error'
 });
 
-const mapPreviewQuestionToQuestionDoc = (previewQuestion, user, institutionId) => {
+// Maps a previewQuestion entry to Prisma Question flat fields
+const mapPreviewQuestionToQuestionData = (previewQuestion, user, schoolId) => {
   const options = (previewQuestion.options || [])
     .map((option) => ({
       label: String(option.label || '').trim().toUpperCase(),
@@ -76,26 +69,18 @@ const mapPreviewQuestionToQuestionDoc = (previewQuestion, user, institutionId) =
     ? String(previewQuestion.detectedAnswer).trim().toUpperCase()
     : '';
 
-  if (!String(previewQuestion.statement || '').trim()) {
-    return { valid: false, reason: 'MISSING_STATEMENT' };
-  }
-
-  if (options.length < 4 || options.length > 5) {
-    return { valid: false, reason: 'INVALID_OPTIONS_COUNT' };
-  }
-
+  if (!String(previewQuestion.statement || '').trim()) return { valid: false, reason: 'MISSING_STATEMENT' };
+  if (options.length < 4 || options.length > 5) return { valid: false, reason: 'INVALID_OPTIONS_COUNT' };
   if (!correctAnswer || !options.some((option) => option.label === correctAnswer)) {
     return { valid: false, reason: 'INVALID_OR_MISSING_ANSWER' };
   }
 
   return {
     valid: true,
-    doc: {
-      institutionId,
-      statement: {
-        text: String(previewQuestion.statement || '').trim(),
-        images: []
-      },
+    data: {
+      schoolId,
+      statementText: String(previewQuestion.statement || '').trim(),
+      statementImages: [],
       latex: '',
       options,
       correctAnswer,
@@ -103,18 +88,14 @@ const mapPreviewQuestionToQuestionDoc = (previewQuestion, user, institutionId) =
       competencia: String(previewQuestion.competencia || DEFAULT_QUESTION_VALUES.competencia).trim() || DEFAULT_QUESTION_VALUES.competencia,
       nivelCognitivo: String(previewQuestion.nivelCognitivo || DEFAULT_QUESTION_VALUES.nivelCognitivo).trim() || DEFAULT_QUESTION_VALUES.nivelCognitivo,
       dificultadCualitativa: String(previewQuestion.dificultadCualitativa || DEFAULT_QUESTION_VALUES.dificultadCualitativa).trim() || DEFAULT_QUESTION_VALUES.dificultadCualitativa,
-      triParams: {
-        a: Number.isFinite(Number(previewQuestion?.tri?.a)) ? Number(previewQuestion.tri.a) : 1,
-        b: Number.isFinite(Number(previewQuestion?.tri?.b)) ? Number(previewQuestion.tri.b) : 0,
-        c: Number.isFinite(Number(previewQuestion?.tri?.c)) ? Number(previewQuestion.tri.c) : 0.2
-      },
+      triParamA: Number.isFinite(Number(previewQuestion?.tri?.a)) ? Number(previewQuestion.tri.a) : 1,
+      triParamB: Number.isFinite(Number(previewQuestion?.tri?.b)) ? Number(previewQuestion.tri.b) : 0,
+      triParamC: Number.isFinite(Number(previewQuestion?.tri?.c)) ? Number(previewQuestion.tri.c) : 0.2,
       visibility: 'private',
       calibrationStatus: 'experimental',
       estado: 'borrador',
-      metadata: {
-        createdBy: user.id,
-        updatedBy: user.id
-      },
+      createdById: user.id,
+      updatedById: user.id,
       currentVersion: 1
     }
   };
@@ -123,32 +104,37 @@ const mapPreviewQuestionToQuestionDoc = (previewQuestion, user, institutionId) =
 const getAuditPrefix = (user) => (user?.role === 'admin' ? 'admin' : 'teacher');
 
 const processJob = async (jobId) => {
-  const job = await PdfImportJob.findById(jobId);
+  const job = await prisma.pdfImportJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
   if (!['uploaded', 'extracting', 'parsing'].includes(job.status)) return job;
 
   try {
-    const outputDir = resolveJobDir(job._id);
+    const outputDir = resolveJobDir(job.id);
     await fs.mkdir(outputDir, { recursive: true });
 
-    job.status = 'extracting';
-    job.errors = [];
-    await job.save();
+    await prisma.pdfImportJob.update({
+      where: { id: jobId },
+      data: { status: 'extracting', errors: [] }
+    });
 
     const extracted = await pdfExtractService.extract({
-      filePath: job.source.filePath,
+      filePath: job.sourceFilePath,
       outputDir
     });
 
     const extractedTextPath = path.join(outputDir, 'extracted.txt');
     await fs.writeFile(extractedTextPath, extracted.text, 'utf8');
 
-    job.pages = Number(extracted.pages || 0);
-    job.isScanned = Boolean(extracted.isScanned);
-    job.ocrEngine = extracted.ocrEngine;
-    job.extractedTextPath = extractedTextPath;
-    job.status = 'parsing';
-    await job.save();
+    await prisma.pdfImportJob.update({
+      where: { id: jobId },
+      data: {
+        pages: Number(extracted.pages || 0),
+        isScanned: Boolean(extracted.isScanned),
+        ocrEngine: extracted.ocrEngine || null,
+        extractedTextPath,
+        status: 'parsing'
+      }
+    });
 
     const parsedJsonPath = path.join(outputDir, 'parsed.json');
     const preview = await pdfQuestionParserService.parseToPreview({
@@ -156,94 +142,100 @@ const processJob = async (jobId) => {
       parsedJsonPath
     });
 
-    job.parsedJsonPath = parsedJsonPath;
-    job.preview = preview;
-    job.status = 'previewReady';
-    await job.save();
-    return job;
+    await prisma.pdfImportJob.update({
+      where: { id: jobId },
+      data: {
+        parsedJsonPath,
+        previewQuestions: preview.questions || [],
+        previewWarnings: preview.warnings || [],
+        previewStats: preview.stats || {},
+        status: 'previewReady'
+      }
+    });
+
+    return prisma.pdfImportJob.findUnique({ where: { id: jobId } });
   } catch (error) {
-    job.status = 'failed';
-    job.errors = [...(job.errors || []), buildJobError(error)];
-    await job.save();
-    return job;
+    const currentJob = await prisma.pdfImportJob.findUnique({ where: { id: jobId }, select: { errors: true } });
+    const existingErrors = Array.isArray(currentJob?.errors) ? currentJob.errors : [];
+    await prisma.pdfImportJob.update({
+      where: { id: jobId },
+      data: { status: 'failed', errors: [...existingErrors, buildJobError(error)] }
+    });
+    return prisma.pdfImportJob.findUnique({ where: { id: jobId } });
   }
 };
 
 pdfImportQueueService.setProcessor(processJob);
 
 const createPdfImportJob = async ({ user, file }) => {
-  const institutionId = toInstitutionId(user.institutionId);
+  const schoolId = user.schoolId;
   const sourceName = safeFileName(file.originalname || 'source.pdf');
-  const created = await PdfImportJob.create({
-    institutionId,
-    createdBy: user.id,
-    status: 'uploaded',
-    source: {
-      filePath: '',
-      originalName: sourceName,
-      mimeType: file.mimetype || 'application/pdf',
-      size: Number(file.size || 0)
+
+  const created = await prisma.pdfImportJob.create({
+    data: {
+      schoolId,
+      createdById: user.id,
+      status: 'uploaded',
+      sourceOriginalName: sourceName,
+      sourceMimeType: file.mimetype || 'application/pdf',
+      sourceSize: Number(file.size || 0)
     }
   });
 
-  const jobDir = resolveJobDir(created._id);
+  const jobDir = resolveJobDir(created.id);
   await fs.mkdir(jobDir, { recursive: true });
   const sourcePath = path.join(jobDir, 'source.pdf');
   await fs.writeFile(sourcePath, file.buffer);
 
-  created.source.filePath = sourcePath;
-  await created.save();
+  await prisma.pdfImportJob.update({
+    where: { id: created.id },
+    data: { sourceFilePath: sourcePath }
+  });
 
   await logAudit({
-    institutionId,
+    schoolId,
     userId: user.id,
     action: `${getAuditPrefix(user)}.pdf-import.create`,
     entityType: 'PdfImportJob',
-    entityId: created._id,
-    metadata: { size: created.source.size, mimeType: created.source.mimeType }
+    entityId: created.id,
+    metadata: { size: created.sourceSize, mimeType: created.sourceMimeType }
   });
 
-  pdfImportQueueService.enqueue(created._id).catch(() => {});
+  pdfImportQueueService.enqueue(created.id).catch(() => {});
 
-  return getPublicJob(created);
+  return getPublicJob(await prisma.pdfImportJob.findUnique({ where: { id: created.id } }));
 };
 
 const listPdfImportJobs = async ({ user, query }) => {
-  const institutionId = toInstitutionId(user.institutionId);
+  const schoolId = user.schoolId;
   const { page, limit, skip, status } = parseListQuery(query);
 
-  const where = { institutionId };
+  const where = { schoolId };
   if (status) where.status = status;
-  if (user.role !== 'admin') where.createdBy = user.id;
+  if (user.role !== 'admin') where.createdById = user.id;
 
   const [items, total] = await Promise.all([
-    PdfImportJob.find(where).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    PdfImportJob.countDocuments(where)
+    prisma.pdfImportJob.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+    prisma.pdfImportJob.count({ where })
   ]);
 
   return {
     items: items.map(getPublicJob),
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / limit))
-    }
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
   };
 };
 
 const getPdfImportJobDetail = async ({ user, id }) => {
-  if (!ensureObjectId(id)) throw new ApiError(400, 'ValidationError', ['id invalido']);
-  const institutionId = toInstitutionId(user.institutionId);
-  const job = await PdfImportJob.findById(id).lean();
-  assertJobAccess({ job, user, institutionId });
+  const schoolId = user.schoolId;
+  const job = await prisma.pdfImportJob.findUnique({ where: { id } });
+  assertJobAccess({ job, user, schoolId });
 
   await logAudit({
-    institutionId,
+    schoolId,
     userId: user.id,
     action: `${getAuditPrefix(user)}.pdf-import.get`,
     entityType: 'PdfImportJob',
-    entityId: job._id,
+    entityId: id,
     metadata: {}
   });
 
@@ -251,109 +243,114 @@ const getPdfImportJobDetail = async ({ user, id }) => {
 };
 
 const updatePdfImportPreview = async ({ user, id, payload }) => {
-  if (!ensureObjectId(id)) throw new ApiError(400, 'ValidationError', ['id invalido']);
-  const institutionId = toInstitutionId(user.institutionId);
-  const job = await PdfImportJob.findById(id);
-  assertJobAccess({ job, user, institutionId });
+  const schoolId = user.schoolId;
+  const job = await prisma.pdfImportJob.findUnique({ where: { id } });
+  assertJobAccess({ job, user, schoolId });
 
   if (job.status !== 'previewReady') {
     throw new ApiError(409, 'InvalidState', ['El job no esta en estado previewReady']);
   }
 
   const sanitizedQuestions = validatePreviewQuestions(payload.questions);
-  job.preview.questions = sanitizedQuestions;
-  await job.save();
+  const updated = await prisma.pdfImportJob.update({
+    where: { id },
+    data: { previewQuestions: sanitizedQuestions }
+  });
 
   await logAudit({
-    institutionId,
+    schoolId,
     userId: user.id,
     action: `${getAuditPrefix(user)}.pdf-import.preview.update`,
     entityType: 'PdfImportJob',
-    entityId: job._id,
+    entityId: id,
     metadata: { editedQuestions: sanitizedQuestions.length }
   });
 
-  return getPublicJob(job);
+  return getPublicJob(updated);
 };
 
 const confirmPdfImportJob = async ({ user, id, payload }) => {
-  if (!ensureObjectId(id)) throw new ApiError(400, 'ValidationError', ['id invalido']);
-  const institutionId = toInstitutionId(user.institutionId);
-  const job = await PdfImportJob.findById(id);
-  assertJobAccess({ job, user, institutionId });
+  const schoolId = user.schoolId;
+  const job = await prisma.pdfImportJob.findUnique({ where: { id } });
+  assertJobAccess({ job, user, schoolId });
 
   if (job.status !== 'previewReady') {
     throw new ApiError(409, 'InvalidState', ['El job no esta listo para confirmar']);
   }
 
   const { selectedQuestionNumbers } = parseConfirmPayload(payload);
+  const allQuestions = Array.isArray(job.previewQuestions) ? job.previewQuestions : [];
   const selected = selectedQuestionNumbers.length
-    ? (job.preview?.questions || []).filter((item) => selectedQuestionNumbers.includes(Number(item.qNumber)))
-    : (job.preview?.questions || []);
+    ? allQuestions.filter((item) => selectedQuestionNumbers.includes(Number(item.qNumber)))
+    : allQuestions;
 
   if (!selected.length) {
     throw new ApiError(400, 'ValidationError', ['No hay preguntas seleccionadas para importar']);
   }
 
-  const operations = [];
+  const valid = [];
   const skipped = [];
+
   selected.forEach((question) => {
-    const mapped = mapPreviewQuestionToQuestionDoc(question, user, institutionId);
+    const mapped = mapPreviewQuestionToQuestionData(question, user, schoolId);
     if (!mapped.valid) {
       skipped.push({ qNumber: question.qNumber, reason: mapped.reason });
-      return;
+    } else {
+      valid.push(mapped.data);
     }
-    operations.push({ insertOne: { document: mapped.doc } });
   });
 
-  if (!operations.length) {
+  if (!valid.length) {
     throw new ApiError(400, 'ValidationError', [
       'No hay preguntas validas para crear',
       ...skipped.map((item) => `Q${item.qNumber}: ${item.reason}`)
     ]);
   }
 
-  const writeResult = await Question.bulkWrite(operations, { ordered: false });
-  const insertedCount = Number(writeResult.insertedCount || 0);
-  const insertedIds = Object.values(writeResult.insertedIds || {});
-  const firstId = insertedIds[0] || null;
+  // Sequential creates replace bulkWrite — tolerate individual failures
+  const createdIds = [];
+  for (const data of valid) {
+    try {
+      const q = await prisma.question.create({ data });
+      createdIds.push(q.id);
+    } catch (_error) {
+      // skip individual failures; final count reflects reality
+    }
+  }
 
-  job.status = 'confirmed';
-  await job.save();
+  await prisma.pdfImportJob.update({ where: { id }, data: { status: 'confirmed' } });
 
   await logAudit({
-    institutionId,
+    schoolId,
     userId: user.id,
     action: `${getAuditPrefix(user)}.pdf-import.confirm`,
     entityType: 'PdfImportJob',
-    entityId: job._id,
-    metadata: {
-      createdCount: insertedCount,
-      skippedCount: skipped.length,
-      sample: firstId
-    }
+    entityId: id,
+    metadata: { createdCount: createdIds.length, skippedCount: skipped.length, sample: createdIds[0] || null }
   });
 
+  const finalJob = await prisma.pdfImportJob.findUnique({ where: { id } });
+
   return {
-    job: getPublicJob(job),
-    createdIds: insertedIds,
-    summary: {
-      selected: selected.length,
-      created: insertedCount,
-      skipped
-    }
+    job: getPublicJob(finalJob),
+    createdIds,
+    summary: { selected: selected.length, created: createdIds.length, skipped }
+  };
+};
+
+const getPdfImportConfig = async ({ user }) => {
+  const config = await prisma.systemConfig.findUnique({
+    where: { schoolId: user.schoolId },
+    select: { maxUploadMB: true }
+  });
+  const maxUploadMB = Number(config?.maxUploadMB);
+  return {
+    maxUploadMB: Number.isFinite(maxUploadMB) && maxUploadMB > 0 ? maxUploadMB : Number(process.env.MAX_UPLOAD_SIZE_MB || 25)
   };
 };
 
 module.exports = {
-  getPdfImportConfig: async ({ user }) => {
-    const institutionId = toInstitutionId(user.institutionId);
-    const config = await SystemConfig.findOne({ institutionId }).select('maxUploadMB').lean();
-    const maxUploadMB = Number(config?.maxUploadMB);
-    return {
-      maxUploadMB: Number.isFinite(maxUploadMB) && maxUploadMB > 0 ? maxUploadMB : Number(process.env.MAX_UPLOAD_SIZE_MB || 25)
-    };
-  },
+  getPdfImportConfig,
   createPdfImportJob,
   listPdfImportJobs,
   getPdfImportJobDetail,

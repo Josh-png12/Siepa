@@ -1,13 +1,5 @@
-﻿const mongoose = require('mongoose');
 const ApiError = require('../utils/ApiError');
-const Course = require('../models/Course');
-const User = require('../models/User');
-const Simulacro = require('../models/Simulacro');
-const SimulacroResult = require('../models/SimulacroResult');
-const StudentProgress = require('../models/StudentProgress');
-const Evaluation = require('../models/Evaluation');
-const PhysicalSimulacro = require('../models/PhysicalSimulacro');
-const SimulacroPhysical = require('../models/SimulacroPhysical');
+const prisma = require('../config/prisma');
 
 const AREA_ORDER = ['Lectura Critica', 'Matematicas', 'Sociales', 'Ciencias Naturales', 'Ingles'];
 const AREA_ALIAS = {
@@ -29,26 +21,15 @@ const toDateValue = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const thetaToScore500 = (theta = 0) => {
-  const value = 250 + Number(theta || 0) * 85;
-  return Math.max(0, Math.min(500, Math.round(value)));
-};
-
-const thetaToScore100 = (theta = 0) => {
-  const value = 50 + Number(theta || 0) * 15;
-  return Math.max(0, Math.min(100, Math.round(value)));
-};
-
-const thetaToPercentile = (theta = 0) => {
-  const value = 50 + Number(theta || 0) * 18;
-  return Math.max(1, Math.min(99, Math.round(value)));
-};
+const thetaToScore500 = (theta = 0) => Math.max(0, Math.min(500, Math.round(250 + Number(theta || 0) * 85)));
+const thetaToScore100 = (theta = 0) => Math.max(0, Math.min(100, Math.round(50 + Number(theta || 0) * 15)));
+const thetaToPercentile = (theta = 0) => Math.max(1, Math.min(99, Math.round(50 + Number(theta || 0) * 18)));
 
 const normalizeAreaName = (raw) => {
   const key = String(raw || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z]/g, '');
   return AREA_ALIAS[key] || null;
 };
@@ -66,58 +47,58 @@ const parsePagination = (query = {}) => {
   return { page, limit, skip: (page - 1) * limit };
 };
 
-const scopedFilter = (baseFilter, institutionId) => ({
-  $and: [
-    baseFilter,
-    {
-      $or: [
-        { institutionId },
-        { institutionId: { $exists: false } }
-      ]
-    }
-  ]
-});
+// Returns courses the student is enrolled in, scoped to their school (multi-tenant safe)
+const getStudentCourses = async ({ studentId, schoolId }) => {
+  const studentRecord = await prisma.student.findUnique({ where: { userId: studentId } });
+  if (!studentRecord) return [];
 
-const getStudentCourses = async ({ studentId, institutionId }) => Course.find(
-  scopedFilter({ students: studentId, deletedAt: null, status: 'active' }, institutionId)
-)
-  .select('_id name grade')
-  .lean();
+  const enrollments = await prisma.courseEnrollment.findMany({
+    where: {
+      studentId: studentRecord.id,
+      course: { schoolId, status: 'active' }
+    },
+    include: { course: { select: { id: true, name: true, grade: true } } }
+  });
 
-const getComparisons = async ({ studentId, institutionId, courseIds = [] }) => {
-  const studentProgress = await StudentProgress.findOne({ student: studentId })
-    .select('globalScore')
-    .lean();
+  return enrollments.map((e) => e.course);
+};
 
-  const studentUsers = await User.find({
-    role: 'estudiante',
-    deletedAt: null,
-    $or: [{ institutionId }, { institutionId: { $exists: false } }]
-  })
-    .select('_id')
-    .lean();
+// Scoped to schoolId — percentile comparison only against students in the same school (multi-tenant fix)
+const getComparisons = async ({ studentId, schoolId, courseIds = [] }) => {
+  const progress = await prisma.studentProgress.findUnique({
+    where: { studentId },
+    select: { globalScore: true }
+  });
 
-  const institutionProgress = await StudentProgress.find({
-    student: { $in: studentUsers.map((item) => item._id) }
-  })
-    .select('globalScore')
-    .lean();
+  const schoolStudents = await prisma.user.findMany({
+    where: { role: 'estudiante', schoolId },
+    select: { id: true }
+  });
+
+  const institutionProgress = await prisma.studentProgress.findMany({
+    where: { studentId: { in: schoolStudents.map((u) => u.id) } },
+    select: { globalScore: true }
+  });
 
   const institutionAvg = institutionProgress.length
     ? Math.round(institutionProgress.reduce((sum, item) => sum + Number(item.globalScore || 0), 0) / institutionProgress.length)
-    : Number(studentProgress?.globalScore || 0);
+    : Number(progress?.globalScore || 0);
 
-  let courseAvg = Number(studentProgress?.globalScore || 0);
+  let courseAvg = Number(progress?.globalScore || 0);
   if (courseIds.length) {
-    const course = await Course.findOne({ _id: courseIds[0] }).select('students').lean();
-    const courseProgress = await StudentProgress.find({
-      student: { $in: course?.students || [] }
-    })
-      .select('globalScore')
-      .lean();
-
-    if (courseProgress.length) {
-      courseAvg = Math.round(courseProgress.reduce((sum, item) => sum + Number(item.globalScore || 0), 0) / courseProgress.length);
+    const firstCourse = await prisma.course.findUnique({
+      where: { id: courseIds[0] },
+      include: { enrollments: { include: { student: { select: { userId: true } } } } }
+    });
+    if (firstCourse) {
+      const courseStudentIds = firstCourse.enrollments.map((e) => e.student.userId);
+      const courseProgress = await prisma.studentProgress.findMany({
+        where: { studentId: { in: courseStudentIds } },
+        select: { globalScore: true }
+      });
+      if (courseProgress.length) {
+        courseAvg = Math.round(courseProgress.reduce((sum, item) => sum + Number(item.globalScore || 0), 0) / courseProgress.length);
+      }
     }
   }
 
@@ -126,31 +107,37 @@ const getComparisons = async ({ studentId, institutionId, courseIds = [] }) => {
 
 const mapPhysicalStatusLabel = (status) => {
   switch (String(status || '').toLowerCase()) {
-    case 'published':
-      return 'publicado';
+    case 'published': return 'publicado';
     case 'reviewing':
-    case 'review':
-      return 'en revision';
+    case 'review': return 'en revision';
     case 'archived':
-    case 'closed':
-      return 'cerrado';
-    default:
-      return 'pendiente ocr';
+    case 'closed': return 'cerrado';
+    default: return 'pendiente ocr';
   }
 };
 
-const getStudentOverview = async ({ studentId, institutionId }) => {
+const getStudentOverview = async ({ studentId, schoolId }) => {
   const [progress, courses] = await Promise.all([
-    StudentProgress.findOne({ student: studentId }).lean(),
-    getStudentCourses({ studentId, institutionId })
+    prisma.studentProgress.findUnique({
+      where: { studentId },
+      include: {
+        competencies: true,
+        thetaHistory: { orderBy: { recordedAt: 'asc' } }
+      }
+    }),
+    getStudentCourses({ studentId, schoolId })
   ]);
 
-  const { page, limit } = parsePagination({ page: 1, limit: 1 });
-  const available = await Simulacro.find(scopedFilter({ estado: 'publicado' }, institutionId))
-    .select('title description fechaPublicacion createdAt globalTimeLimit modules')
-    .sort({ fechaPublicacion: -1, createdAt: -1 })
-    .limit(limit)
-    .lean();
+  const available = await prisma.simulacro.findMany({
+    where: { schoolId, estado: 'publicado' },
+    select: {
+      id: true, title: true, description: true, fechaPublicacion: true,
+      createdAt: true, globalTimeLimit: true,
+      modules: { include: { questions: { select: { id: true } } } }
+    },
+    orderBy: [{ fechaPublicacion: 'desc' }, { createdAt: 'desc' }],
+    take: 1
+  });
 
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - 6);
@@ -160,15 +147,12 @@ const getStudentOverview = async ({ studentId, institutionId }) => {
   for (let i = 0; i < 7; i += 1) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
-    weeklySeries.push({
-      date: day.toISOString(),
-      theta: null
-    });
+    weeklySeries.push({ date: day.toISOString(), theta: null });
   }
 
-  const historial = Array.isArray(progress?.historialTheta) ? progress.historialTheta : [];
+  const historial = progress?.thetaHistory || [];
   historial.forEach((item) => {
-    const date = toDateValue(item.date);
+    const date = toDateValue(item.recordedAt);
     if (!date || date < weekStart) return;
     const dayKey = date.toISOString().slice(0, 10);
     const target = weeklySeries.find((slot) => slot.date.slice(0, 10) === dayKey);
@@ -185,7 +169,7 @@ const getStudentOverview = async ({ studentId, institutionId }) => {
   const trendDelta = previousTheta === null ? 0 : Number((currentTheta - previousTheta).toFixed(3));
   const trendLabel = trendDelta > 0.05 ? 'subiendo' : trendDelta < -0.05 ? 'bajando' : 'estable';
 
-  const weakestCompetency = Array.isArray(progress?.competencies) && progress.competencies.length
+  const weakestCompetency = progress?.competencies?.length
     ? [...progress.competencies].sort((a, b) => Number(a.theta || 0) - Number(b.theta || 0))[0]
     : null;
 
@@ -203,24 +187,25 @@ const getStudentOverview = async ({ studentId, institutionId }) => {
       theta: null
     };
 
-  const latestVirtual = await SimulacroResult.find({ studentId, status: 'submitted' })
-    .select('overallTheta percentile updatedAt simulacroId')
-    .populate('simulacroId', 'title')
-    .sort({ updatedAt: -1 })
-    .limit(3)
-    .lean();
-
-  const latestPhysical = await Evaluation.find({ student: studentId, evaluationType: 'physical', status: 'completed' })
-    .select('theta percentile globalScore updatedAt physicalSimulacro')
-    .populate('physicalSimulacro', 'title')
-    .sort({ updatedAt: -1 })
-    .limit(3)
-    .lean();
+  const [latestVirtual, latestPhysical] = await Promise.all([
+    prisma.simulacroResult.findMany({
+      where: { studentId, status: 'submitted' },
+      include: { simulacro: { select: { title: true } } },
+      orderBy: { updatedAt: 'desc' },
+      take: 3
+    }),
+    prisma.evaluation.findMany({
+      where: { studentId, evaluationType: 'physical', status: 'completed' },
+      include: { physicalSimulacro: { select: { title: true } } },
+      orderBy: { updatedAt: 'desc' },
+      take: 3
+    })
+  ]);
 
   const latestResults = [
     ...latestVirtual.map((item) => ({
       type: 'virtual',
-      title: item.simulacroId?.title || 'Simulacro virtual',
+      title: item.simulacro?.title || 'Simulacro virtual',
       theta: Number(item.overallTheta || 0),
       percentile: Number(item.percentile || thetaToPercentile(item.overallTheta || 0)),
       score: thetaToScore500(item.overallTheta || 0),
@@ -244,18 +229,15 @@ const getStudentOverview = async ({ studentId, institutionId }) => {
       percentil: Number(progress?.percentile || 50),
       scoreGlobal: Number(progress?.globalScore || 0),
       simulacrosCompletados: Number(progress?.simulacrosCompletados || 0),
-      trend: {
-        label: trendLabel,
-        delta: trendDelta
-      }
+      trend: { label: trendLabel, delta: trendDelta }
     },
     nextSimulacro: available[0]
       ? {
-        id: available[0]._id,
+        id: available[0].id,
         title: available[0].title,
         description: available[0].description || '',
         date: available[0].fechaPublicacion || available[0].createdAt,
-        questionCount: (available[0].modules || []).reduce((sum, moduleItem) => sum + (moduleItem.questions?.length || 0), 0),
+        questionCount: (available[0].modules || []).reduce((sum, m) => sum + (m.questions?.length || 0), 0),
         duration: available[0].globalTimeLimit || null,
         type: 'virtual'
       }
@@ -263,67 +245,55 @@ const getStudentOverview = async ({ studentId, institutionId }) => {
     weeklyProgress: weeklySeries,
     objective,
     latestResults,
-    courses: courses.map((course) => ({ id: course._id, name: course.name, grade: course.grade }))
+    courses: courses.map((c) => ({ id: c.id, name: c.name, grade: c.grade }))
   };
 };
 
-const getStudentSimulacros = async ({ studentId, institutionId, status = 'available', query = {} }) => {
+const getStudentSimulacros = async ({ studentId, schoolId, status = 'available', query = {} }) => {
   const requested = ['available', 'inProgress', 'completed'].includes(status) ? status : 'available';
   const { page, limit, skip } = parsePagination(query);
 
   const [attempts, courses] = await Promise.all([
-    SimulacroResult.find({ studentId })
-      .select('simulacroId status updatedAt createdAt overallTheta percentile')
-      .sort({ updatedAt: -1 })
-      .lean(),
-    getStudentCourses({ studentId, institutionId })
+    prisma.simulacroResult.findMany({
+      where: { studentId },
+      select: { simulacroId: true, status: true, updatedAt: true, createdAt: true, overallTheta: true, percentile: true, id: true },
+      orderBy: { updatedAt: 'desc' }
+    }),
+    getStudentCourses({ studentId, schoolId })
   ]);
 
   const latestBySimulacro = new Map();
   attempts.forEach((item) => {
-    const key = String(item.simulacroId);
-    if (!latestBySimulacro.has(key)) latestBySimulacro.set(key, item);
+    if (!latestBySimulacro.has(item.simulacroId)) latestBySimulacro.set(item.simulacroId, item);
   });
 
-  const allVirtual = await Simulacro.find(scopedFilter({ estado: 'publicado' }, institutionId))
-    .select('title description modules globalTimeLimit strictMode fechaPublicacion createdAt')
-    .sort({ fechaPublicacion: -1, createdAt: -1 })
-    .lean();
+  const allVirtual = await prisma.simulacro.findMany({
+    where: { schoolId, estado: 'publicado' },
+    include: { modules: { include: { questions: { select: { id: true } } } } },
+    orderBy: [{ fechaPublicacion: 'desc' }, { createdAt: 'desc' }]
+  });
 
-  const bucketed = {
-    available: [],
-    inProgress: [],
-    completed: []
-  };
+  const bucketed = { available: [], inProgress: [], completed: [] };
 
   allVirtual.forEach((simulacro) => {
-    const key = String(simulacro._id);
-    const attempt = latestBySimulacro.get(key);
+    const attempt = latestBySimulacro.get(simulacro.id);
     const base = {
-      id: simulacro._id,
+      id: simulacro.id,
       title: simulacro.title,
       description: simulacro.description || '',
-      questionCount: (simulacro.modules || []).reduce((sum, moduleItem) => sum + (moduleItem.questions?.length || 0), 0),
+      questionCount: (simulacro.modules || []).reduce((sum, m) => sum + (m.questions?.length || 0), 0),
       duration: simulacro.globalTimeLimit,
       type: 'virtual',
       strictMode: Boolean(simulacro.strictMode),
       date: simulacro.fechaPublicacion || simulacro.createdAt,
-      attemptId: attempt?._id || null
+      attemptId: attempt?.id || null
     };
 
-    if (!attempt) {
-      bucketed.available.push(base);
-      return;
-    }
-
+    if (!attempt) { bucketed.available.push(base); return; }
     if (attempt.status === 'in_progress') {
-      bucketed.inProgress.push({
-        ...base,
-        lastActivity: attempt.updatedAt || attempt.createdAt
-      });
+      bucketed.inProgress.push({ ...base, lastActivity: attempt.updatedAt || attempt.createdAt });
       return;
     }
-
     bucketed.completed.push({
       ...base,
       score: thetaToScore500(attempt.overallTheta || 0),
@@ -337,81 +307,64 @@ const getStudentSimulacros = async ({ studentId, institutionId, status = 'availa
   const total = selected.length;
   const items = selected.slice(skip, skip + limit);
 
-  const courseIds = courses.map((item) => item._id);
+  const courseIds = courses.map((c) => c.id);
 
-  const [physicalV2, physicalV1] = await Promise.all([
-    PhysicalSimulacro.find(scopedFilter({ courses: { $in: courseIds } }, institutionId))
-      .select('title date status courses totalQuestions')
-      .populate('courses', 'name grade')
-      .sort({ date: -1 })
-      .lean(),
-    SimulacroPhysical.find({ assignedCourses: { $in: courseIds } })
-      .select('title date status assignedCourses questionCount')
-      .populate('assignedCourses', 'name grade')
-      .sort({ date: -1 })
-      .lean()
-  ]);
+  // Physical simulacros for enrolled courses — read-only display (no legacy SimulacroPhysical)
+  const physicalSimulacros = courseIds.length
+    ? await prisma.physicalSimulacro.findMany({
+        where: {
+          schoolId,
+          courses: { some: { id: { in: courseIds } } }
+        },
+        include: { courses: { select: { name: true, grade: true } } },
+        orderBy: { date: 'desc' }
+      })
+    : [];
 
-  const physicalReadOnly = [
-    ...physicalV2.map((item) => ({
-      id: item._id,
-      title: item.title,
-      date: item.date,
-      type: 'physical',
-      source: 'v2',
-      readOnly: true,
-      status: item.status,
-      statusLabel: mapPhysicalStatusLabel(item.status),
-      questionCount: Number(item.totalQuestions || 0),
-      courses: (item.courses || []).map((course) => course.name)
-    })),
-    ...physicalV1.map((item) => ({
-      id: item._id,
-      title: item.title,
-      date: item.date,
-      type: 'physical',
-      source: 'v1',
-      readOnly: true,
-      status: item.status,
-      statusLabel: mapPhysicalStatusLabel(item.status),
-      questionCount: Number(item.questionCount || 0),
-      courses: (item.assignedCourses || []).map((course) => course.name)
-    }))
-  ].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const physicalReadOnly = physicalSimulacros.map((item) => ({
+    id: item.id,
+    title: item.title,
+    date: item.date,
+    type: 'physical',
+    source: 'v2',
+    readOnly: true,
+    status: item.status,
+    statusLabel: mapPhysicalStatusLabel(item.status),
+    questionCount: Number(item.totalQuestions || 0),
+    courses: (item.courses || []).map((c) => c.name)
+  }));
 
   return {
     status: requested,
     items,
     physicalReadOnly,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / limit))
-    }
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
   };
 };
 
-const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' }) => {
+const buildUnifiedResultData = async ({ studentId, schoolId, scope = 'all' }) => {
   const includeVirtual = scope === 'all' || scope === 'virtual';
   const includePhysical = scope === 'all' || scope === 'physical';
 
   const [progress, courses, virtualResults, physicalResults] = await Promise.all([
-    StudentProgress.findOne({ student: studentId }).lean(),
-    getStudentCourses({ studentId, institutionId }),
+    prisma.studentProgress.findUnique({ where: { studentId } }),
+    getStudentCourses({ studentId, schoolId }),
     includeVirtual
-      ? SimulacroResult.find({ studentId, status: 'submitted' })
-        .select('simulacroId overallTheta percentile thetasByModule updatedAt createdAt')
-        .populate('simulacroId', 'title')
-        .sort({ updatedAt: 1, createdAt: 1 })
-        .lean()
+      ? prisma.simulacroResult.findMany({
+          where: { studentId, status: 'submitted' },
+          include: {
+            simulacro: { select: { title: true } },
+            moduleThetas: true
+          },
+          orderBy: { updatedAt: 'asc' }
+        })
       : Promise.resolve([]),
     includePhysical
-      ? Evaluation.find({ student: studentId, evaluationType: 'physical', status: 'completed' })
-        .select('theta percentile globalScore physicalMeta updatedAt createdAt physicalSimulacro')
-        .populate('physicalSimulacro', 'title')
-        .sort({ updatedAt: 1, createdAt: 1 })
-        .lean()
+      ? prisma.evaluation.findMany({
+          where: { studentId, evaluationType: 'physical', status: 'completed' },
+          include: { physicalSimulacro: { select: { title: true } } },
+          orderBy: { updatedAt: 'asc' }
+        })
       : Promise.resolve([])
   ]);
 
@@ -424,23 +377,18 @@ const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' 
     const percentile = Number(item.percentile || thetaToPercentile(item.overallTheta || 0));
 
     timeline.push({
-      date,
-      type: 'virtual',
-      title: item.simulacroId?.title || 'Simulacro virtual',
-      score,
-      theta: Number(item.overallTheta || 0),
-      percentile
+      date, type: 'virtual', title: item.simulacro?.title || 'Simulacro virtual',
+      score, theta: Number(item.overallTheta || 0), percentile
     });
 
-    (item.thetasByModule || []).forEach((moduleTheta) => {
-      const area = normalizeAreaName(moduleTheta.moduleName) || moduleTheta.moduleName;
+    (item.moduleThetas || []).forEach((mt) => {
+      const area = normalizeAreaName(mt.moduleName) || mt.moduleName;
       if (!areaMap.has(area)) areaMap.set(area, []);
       areaMap.get(area).push({
-        date,
-        type: 'virtual',
-        score: thetaToScore100(moduleTheta.theta || 0),
-        theta: Number(moduleTheta.theta || 0),
-        percentile: thetaToPercentile(moduleTheta.theta || 0)
+        date, type: 'virtual',
+        score: thetaToScore100(mt.theta || 0),
+        theta: Number(mt.theta || 0),
+        percentile: thetaToPercentile(mt.theta || 0)
       });
     });
   });
@@ -451,33 +399,23 @@ const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' 
     const percentile = Number(item.percentile || thetaToPercentile(item.theta || 0));
 
     timeline.push({
-      date,
-      type: 'physical',
-      title: item.physicalSimulacro?.title || 'Simulacro fisico',
-      score,
-      theta: Number(item.theta || 0),
-      percentile
+      date, type: 'physical', title: item.physicalSimulacro?.title || 'Simulacro fisico',
+      score, theta: Number(item.theta || 0), percentile
     });
 
-    const breakdown = item.physicalMeta?.competencyBreakdown || [];
+    const breakdown = item.physicalCompetencyBreakdown || [];
     breakdown.forEach((row) => {
       const area = normalizeAreaName(row.competencia) || normalizeAreaName(row.area) || 'Ciencias Naturales';
       if (!areaMap.has(area)) areaMap.set(area, []);
       const ratio = row.total ? Number(row.correct || 0) / Number(row.total) : 0;
-      areaMap.get(area).push({
-        date,
-        type: 'physical',
-        score: Math.round(ratio * 100),
-        theta: Number(item.theta || 0),
-        percentile
-      });
+      areaMap.get(area).push({ date, type: 'physical', score: Math.round(ratio * 100), theta: Number(item.theta || 0), percentile });
     });
   });
 
   const comparisons = await getComparisons({
     studentId,
-    institutionId,
-    courseIds: courses.map((item) => item._id)
+    schoolId,
+    courseIds: courses.map((c) => c.id)
   });
 
   const sortedTimeline = timeline.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -486,39 +424,12 @@ const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' 
   const areas = AREA_ORDER.map((areaName) => {
     const records = areaMap.get(areaName) || [];
     if (!records.length) {
-      return {
-        name: areaName,
-        score0_100: null,
-        percentile: null,
-        level: 'Sin datos',
-        theta: null,
-        strengths: [],
-        weaknesses: [],
-        recommendations: [],
-        timeline: []
-      };
+      return { name: areaName, score0_100: null, percentile: null, level: 'Sin datos', theta: null, strengths: [], weaknesses: [], recommendations: [], timeline: [] };
     }
 
     const avgScore = Number((records.reduce((sum, item) => sum + Number(item.score || 0), 0) / records.length).toFixed(1));
     const avgTheta = Number((records.reduce((sum, item) => sum + Number(item.theta || 0), 0) / records.length).toFixed(3));
     const avgPercentile = Math.round(records.reduce((sum, item) => sum + Number(item.percentile || 0), 0) / records.length);
-
-    const strengths = avgScore >= 75
-      ? [`Tu punto fuerte: ${areaName} se mantiene por encima del promedio esperado.`]
-      : [];
-
-    const weaknesses = avgScore < 60
-      ? [`Debes reforzar ${areaName}. Tu rendimiento actual esta por debajo del objetivo institucional.`]
-      : [];
-
-    const recommendations = avgScore < 60
-      ? [
-          `Practica semanal enfocada en ${areaName}.`,
-          'Resuelve preguntas de dificultad media-alta y revisa retroalimentacion.'
-        ]
-      : [
-          `Vas bien en ${areaName}. Mantener practica de consolidacion.`
-        ];
 
     return {
       name: areaName,
@@ -526,15 +437,12 @@ const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' 
       percentile: avgPercentile,
       level: levelFromScore(avgScore),
       theta: avgTheta,
-      strengths,
-      weaknesses,
-      recommendations,
-      timeline: records.map((item) => ({
-        date: item.date,
-        type: item.type,
-        score: item.score,
-        theta: item.theta
-      }))
+      strengths: avgScore >= 75 ? [`Tu punto fuerte: ${areaName} se mantiene por encima del promedio esperado.`] : [],
+      weaknesses: avgScore < 60 ? [`Debes reforzar ${areaName}. Tu rendimiento actual esta por debajo del objetivo institucional.`] : [],
+      recommendations: avgScore < 60
+        ? [`Practica semanal enfocada en ${areaName}.`, 'Resuelve preguntas de dificultad media-alta y revisa retroalimentacion.']
+        : [`Vas bien en ${areaName}. Mantener practica de consolidacion.`],
+      timeline: records.map((item) => ({ date: item.date, type: item.type, score: item.score, theta: item.theta }))
     };
   });
 
@@ -547,25 +455,30 @@ const buildUnifiedResultData = async ({ studentId, institutionId, scope = 'all' 
   };
 };
 
-const getStudentResults = async ({ studentId, institutionId, scope = 'all' }) => {
+const getStudentResults = async ({ studentId, schoolId, scope = 'all' }) => {
   if (!['all', 'virtual', 'physical'].includes(scope)) {
     throw buildError(400, 'ValidationError', ['scope invalido']);
   }
-
-  return buildUnifiedResultData({ studentId, institutionId, scope });
+  return buildUnifiedResultData({ studentId, schoolId, scope });
 };
 
-const getStudentProgress = async ({ studentId, institutionId }) => {
+const getStudentProgress = async ({ studentId, schoolId }) => {
   const [progress, results] = await Promise.all([
-    StudentProgress.findOne({ student: studentId }).lean(),
-    buildUnifiedResultData({ studentId, institutionId, scope: 'all' })
+    prisma.studentProgress.findUnique({
+      where: { studentId },
+      include: {
+        competencies: true,
+        thetaHistory: { orderBy: { recordedAt: 'asc' } }
+      }
+    }),
+    buildUnifiedResultData({ studentId, schoolId, scope: 'all' })
   ]);
 
-  const thetaSeries = (progress?.historialTheta || [])
+  const thetaSeries = (progress?.thetaHistory || [])
     .map((item) => ({
-      date: item.date,
+      date: item.recordedAt,
       theta: Number(item.theta || 0),
-      score: Number(item.globalScore || thetaToScore500(item.theta || 0))
+      score: Number(thetaToScore500(item.theta || 0))
     }))
     .filter((item) => toDateValue(item.date))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -578,14 +491,10 @@ const getStudentProgress = async ({ studentId, institutionId }) => {
     lastUpdated: item.lastUpdated
   }));
 
-  const weakestTheta = competencies.length
-    ? Math.min(...competencies.map((item) => Number(item.theta || 0)))
-    : 0;
-
+  const weakestTheta = competencies.length ? Math.min(...competencies.map((item) => Number(item.theta || 0))) : 0;
   const trend = thetaSeries.length >= 2
     ? Number((thetaSeries[thetaSeries.length - 1].theta - thetaSeries[thetaSeries.length - 2].theta).toFixed(3))
     : 0;
-
   const riskCognitive = weakestTheta < -0.5 || trend < -0.2;
 
   return {
@@ -603,17 +512,25 @@ const getStudentProgress = async ({ studentId, institutionId }) => {
   };
 };
 
-const getStudentRanking = async ({ studentId, institutionId }) => {
-  const courses = await getStudentCourses({ studentId, institutionId });
+// Ranking scoped to schoolId — prevents cross-school comparisons (multi-tenant fix)
+const getStudentRanking = async ({ studentId, schoolId }) => {
+  const courses = await getStudentCourses({ studentId, schoolId });
   if (!courses.length) return { items: [], position: null, total: 0 };
 
-  const course = await Course.findById(courses[0]._id).select('students').lean();
-  const progresses = await StudentProgress.find({ student: { $in: course?.students || [] } })
-    .select('student currentTheta globalScore percentile')
-    .sort({ currentTheta: -1 })
-    .lean();
+  const firstCourse = await prisma.course.findUnique({
+    where: { id: courses[0].id },
+    include: { enrollments: { include: { student: { select: { userId: true } } } } }
+  });
 
-  const position = progresses.findIndex((item) => String(item.student) === String(studentId));
+  const courseStudentIds = (firstCourse?.enrollments || []).map((e) => e.student.userId);
+
+  const progresses = await prisma.studentProgress.findMany({
+    where: { studentId: { in: courseStudentIds }, schoolId },
+    select: { studentId: true, currentTheta: true, globalScore: true, percentile: true },
+    orderBy: { currentTheta: 'desc' }
+  });
+
+  const position = progresses.findIndex((item) => item.studentId === studentId);
 
   return {
     items: progresses,

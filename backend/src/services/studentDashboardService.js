@@ -1,311 +1,259 @@
-// backend/src/services/studentDashboardService.js
-const Student = require('../models/Student');
-const StudentProgress = require('../models/StudentProgress');
-const Simulacro = require('../models/Simulacro');
-const Course = require('../models/Course');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
 
-class StudentDashboardService {
-  
-  async getDashboardData(userId) {
-    try {
-      const [
-        user,
-        studentRecord,
-        progress,
-        simulacrosInfo
-      ] = await Promise.all([
-        this._getUserInfo(userId),
-        this._getStudentRecord(userId),
-        this._getOrCreateProgress(userId),
-        this._getSimulacrosInfo(userId)
-      ]);
+const erfApprox = (x) => {
+  const sign = x < 0 ? -1 : 1;
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return sign * y;
+};
 
-      const courseInfo = await this._getCourseInfo(studentRecord);
-      const competencias = this._formatCompetencias(progress);
-      const tendencia = this._calculateTendencia(progress);
-      const alertas = this._generateAlertas(progress, tendencia);
-      const ranking = await this._getRankingPosition(userId, studentRecord, progress);
+const thetaToPercentile = (theta) => {
+  const cdf = 0.5 * (1 + erfApprox(Number(theta) / Math.sqrt(2)));
+  return Math.max(0, Math.min(100, Math.round(cdf * 100)));
+};
 
-      return {
-        student: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          grade: studentRecord?.grade || 'No asignado',
-          courseName: courseInfo?.name || 'Sin curso'
-        },
+const getThetaLevel = (theta) => {
+  if (theta >= 2) return 'Avanzado';
+  if (theta >= 1) return 'Intermedio-Alto';
+  if (theta >= 0) return 'Intermedio';
+  if (theta >= -1) return 'Basico';
+  return 'Inicial';
+};
 
-        metrics: {
-          currentTheta: progress?.currentTheta || 0,
-          globalScore: progress?.globalScore || 0,
-          percentile: progress?.percentile || 50,
-          simulacrosCompletados: progress?.simulacrosCompletados || 0,
-          racha: progress?.rachaActual || 0,
-          totalPreguntas: this._getTotalPreguntas(progress)
-        },
+const calculateTendencia = (thetaHistory) => {
+  if (!thetaHistory || thetaHistory.length < 2) return { direction: 'stable', change: 0 };
 
-        competencias: competencias,
+  const recent = thetaHistory.slice(-3);
+  const previous = thetaHistory.slice(-6, -3);
+  if (!previous.length) return { direction: 'stable', change: 0 };
 
-        tendencia: {
-          direction: tendencia.direction,
-          change: tendencia.change,
-          lastFive: progress?.historialTheta?.slice(-5) || []
-        },
+  const recentAvg = recent.reduce((sum, h) => sum + Number(h.theta || 0), 0) / recent.length;
+  const previousAvg = previous.reduce((sum, h) => sum + Number(h.theta || 0), 0) / previous.length;
 
-        alertas: alertas,
+  const change = previousAvg === 0 ? 0 : ((recentAvg - previousAvg) / Math.abs(previousAvg)) * 100;
+  return {
+    direction: change > 2 ? 'up' : change < -2 ? 'down' : 'stable',
+    change: Number(change.toFixed(1))
+  };
+};
 
-        ranking: {
-          position: ranking.position,
-          total: ranking.total,
-          percentageAbove: ranking.percentageAbove
-        },
+const formatCompetencias = (competencies) => {
+  const areas = ['matematicas', 'lecturaCritica', 'cienciasNaturales', 'sociales', 'ingles'];
+  const competenciasMap = {};
 
-        simulacrosDisponibles: simulacrosInfo.disponibles,
-        historialReciente: simulacrosInfo.historial,
-
-        lastUpdate: new Date(),
-        nextSimulacro: simulacrosInfo.disponibles[0] || null
-      };
-
-    } catch (error) {
-      console.error('❌ Error en getDashboardData:', error);
-      throw new Error('Error al cargar dashboard del estudiante');
-    }
-  }
-
-  async _getUserInfo(userId) {
-    const user = await User.findById(userId)
-      .select('name email role')
-      .lean();
-    
-    if (!user) {
-      throw new Error('Usuario no encontrado');
-    }
-    
-    return user;
-  }
-
-  async _getStudentRecord(userId) {
-    const student = await Student.findOne({ user: userId })
-      .select('grade courses')
-      .lean();
-
-    return student;
-  }
-
-  async _getOrCreateProgress(userId) {
-    let progress = await StudentProgress.findOne({ student: userId })
-      .lean();
-
-    if (!progress) {
-      progress = await StudentProgress.create({
-        student: userId,
-        currentTheta: 0,
-        globalScore: 0,
-        percentile: 50,
-        competencies: [],
-        historialTheta: [],
-        alertas: [],
-        rachaActual: 0,
-        simulacrosCompletados: 0
-      });
-    }
-
-    return progress;
-  }
-
-  async _getSimulacrosInfo(userId) {
-    const studentRecord = await Student.findOne({ user: userId })
-      .select('courses')
-      .lean();
-    
-    if (!studentRecord?.courses?.length) {
-      return { disponibles: [], historial: [] };
-    }
-
-    const progress = await StudentProgress.findOne({ student: userId })
-      .select('historialTheta')
-      .lean();
-
-    const completedIds = progress?.historialTheta?.map(h => h.simulacro).filter(Boolean) || [];
-
-    const disponibles = await Simulacro.find({
-      course: { $in: studentRecord.courses },
-      active: true,
-      _id: { $nin: completedIds }
-    })
-      .populate('course', 'name grade')
-      .select('title description duration questions type createdAt')
-      .sort({ createdAt: -1 })
-      .limit(12)
-      .lean();
-
-    const disponiblesFormatted = disponibles.map(sim => ({
-      _id: sim._id,
-      title: sim.title,
-      description: sim.description,
-      duration: sim.duration,
-      questionsCount: sim.questions?.length || 0,
-      courseName: sim.course?.name,
-      grade: sim.course?.grade,
-      type: sim.type,
-      createdAt: sim.createdAt
-    }));
-
-    const historial = progress?.historialTheta?.slice(-10) || [];
-
-    return {
-      disponibles: disponiblesFormatted,
-      historial: historial
+  areas.forEach((area) => {
+    const comp = (competencies || []).find((c) =>
+      String(c.area || '').toLowerCase().replace(/[\s_]/g, '') ===
+      area.toLowerCase().replace(/lecturacritica/i, 'lecturacritica')
+    );
+    competenciasMap[area] = {
+      theta: comp?.theta || 0,
+      nivel: getThetaLevel(comp?.theta || 0),
+      percentile: thetaToPercentile(comp?.theta || 0),
+      questionsAnswered: comp?.questionsAnswered || 0
     };
-  }
+  });
 
-  async _getCourseInfo(studentRecord) {
-    if (!studentRecord?.courses?.[0]) return null;
+  return competenciasMap;
+};
 
-    const course = await Course.findById(studentRecord.courses[0])
-      .select('name grade')
-      .lean();
+const generateAlertas = (progress, tendencia) => {
+  const alertas = [];
 
-    return course;
-  }
-
-  _formatCompetencias(progress) {
-    const areas = ['matematicas', 'lecturaCritica', 'cienciasNaturales', 'sociales', 'ingles'];
-    const competenciasMap = {};
-
-    areas.forEach(area => {
-      const comp = progress?.competencies?.find(c => 
-        c.area === area.toLowerCase().replace('lecturacrítica', 'lectura').replace('cienciasnaturales', 'ciencias')
-      );
-      
-      competenciasMap[area] = {
-        theta: comp?.theta || 0,
-        nivel: this._getThetaLevel(comp?.theta || 0),
-        percentile: this._thetaToPercentile(comp?.theta || 0),
-        questionsAnswered: comp?.questionsAnswered || 0
-      };
+  if (progress && progress.currentTheta < -1) {
+    alertas.push({
+      type: 'danger',
+      title: 'Nivel de habilidad bajo',
+      message: `Tu θ actual (${Number(progress.currentTheta).toFixed(2)}) requiere refuerzo`,
+      action: 'Ver material de apoyo'
     });
-
-    return competenciasMap;
   }
 
-  _calculateTendencia(progress) {
-    const historial = progress?.historialTheta || [];
-    
-    if (historial.length < 2) {
-      return { direction: 'stable', change: 0 };
-    }
-
-    const recent = historial.slice(-3);
-    const previous = historial.slice(-6, -3);
-
-    if (previous.length === 0) {
-      return { direction: 'stable', change: 0 };
-    }
-
-    const recentAvg = recent.reduce((sum, h) => sum + (h.theta || 0), 0) / recent.length;
-    const previousAvg = previous.reduce((sum, h) => sum + (h.theta || 0), 0) / previous.length;
-
-    const change = previousAvg === 0 ? 0 : ((recentAvg - previousAvg) / Math.abs(previousAvg)) * 100;
-
-    return {
-      direction: change > 2 ? 'up' : change < -2 ? 'down' : 'stable',
-      change: change.toFixed(1)
-    };
+  if (tendencia.direction === 'down') {
+    alertas.push({
+      type: 'warning',
+      title: 'Tendencia descendente',
+      message: `Tu rendimiento ha bajado ${Math.abs(tendencia.change)}%`,
+      action: 'Revisar competencias'
+    });
   }
 
-  _generateAlertas(progress, tendencia) {
-    const alertas = [];
-
-    if (progress?.currentTheta < -1) {
-      alertas.push({
-        type: 'danger',
-        title: 'Nivel de habilidad bajo',
-        message: `Tu θ actual (${progress.currentTheta.toFixed(2)}) requiere refuerzo`,
-        action: 'Ver material de apoyo'
-      });
-    }
-
-    if (tendencia.direction === 'down') {
-      alertas.push({
-        type: 'warning',
-        title: 'Tendencia descendente',
-        message: `Tu rendimiento ha bajado ${Math.abs(tendencia.change)}%`,
-        action: 'Revisar competencias'
-      });
-    }
-
-    if (tendencia.direction === 'up' && parseFloat(tendencia.change) > 5) {
-      alertas.push({
-        type: 'success',
-        title: '¡Excelente progreso!',
-        message: `Has mejorado ${tendencia.change}%`,
-        action: 'Continuar practicando'
-      });
-    }
-
-    if (progress?.rachaActual >= 5) {
-      alertas.push({
-        type: 'info',
-        title: `Racha de ${progress.rachaActual} días`,
-        message: '¡Mantén tu constancia!',
-        action: 'Ver estadísticas'
-      });
-    }
-
-    return alertas;
+  if (tendencia.direction === 'up' && Number(tendencia.change) > 5) {
+    alertas.push({
+      type: 'success',
+      title: '¡Excelente progreso!',
+      message: `Has mejorado ${tendencia.change}%`,
+      action: 'Continuar practicando'
+    });
   }
 
-  async _getRankingPosition(userId, studentRecord, progress) {
-    if (!studentRecord?.courses?.[0]) {
-      return { position: 0, total: 0, percentageAbove: 0 };
+  if (progress && (progress.rachaActual || 0) >= 5) {
+    alertas.push({
+      type: 'info',
+      title: `Racha de ${progress.rachaActual} dias`,
+      message: '¡Mantén tu constancia!',
+      action: 'Ver estadisticas'
+    });
+  }
+
+  return alertas;
+};
+
+// schoolId-scoped ranking prevents comparing students across schools (multi-tenant fix)
+const getRankingPosition = async ({ userId, schoolId, studentRecord }) => {
+  if (!studentRecord) return { position: 0, total: 0, percentageAbove: 0 };
+
+  // Get first course enrollment's course to scope the ranking
+  const firstEnrollment = await prisma.courseEnrollment.findFirst({
+    where: { studentId: studentRecord.id },
+    include: { course: { select: { id: true, schoolId: true } } }
+  });
+
+  if (!firstEnrollment) return { position: 0, total: 0, percentageAbove: 0 };
+
+  const courseId = firstEnrollment.courseId;
+
+  // Get all students enrolled in the same course (all must share the same schoolId)
+  const enrollments = await prisma.courseEnrollment.findMany({
+    where: { courseId },
+    include: { student: { select: { userId: true } } }
+  });
+
+  const courseStudentUserIds = enrollments.map((e) => e.student.userId);
+
+  const allProgress = await prisma.studentProgress.findMany({
+    where: {
+      studentId: { in: courseStudentUserIds },
+      schoolId // multi-tenant scope: only students in the same school
+    },
+    select: { studentId: true, currentTheta: true },
+    orderBy: { currentTheta: 'desc' }
+  });
+
+  const position = allProgress.findIndex((p) => p.studentId === userId) + 1;
+  const total = allProgress.length;
+  const percentageAbove = total > 0 ? Number(((total - position) / total * 100).toFixed(1)) : 0;
+
+  return { position, total, percentageAbove };
+};
+
+const getSimulacrosInfo = async ({ studentRecord, userId, schoolId }) => {
+  if (!studentRecord) return { disponibles: [], historial: [] };
+
+  const enrollments = await prisma.courseEnrollment.findMany({
+    where: { studentId: studentRecord.id },
+    select: { courseId: true }
+  });
+
+  if (!enrollments.length) return { disponibles: [], historial: [] };
+
+  const thetaHistory = await prisma.thetaHistory.findMany({
+    where: { progress: { studentId: userId } },
+    select: { id: true, theta: true, globalScore: true, recordedAt: true },
+    orderBy: { recordedAt: 'asc' }
+  });
+
+  const disponibles = await prisma.simulacro.findMany({
+    where: { schoolId, estado: 'publicado' },
+    select: {
+      id: true, title: true, description: true, globalTimeLimit: true,
+      createdAt: true, estado: true,
+      modules: { select: { _count: { select: { questions: true } } } }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 12
+  });
+
+  const disponiblesFormatted = disponibles.map((sim) => ({
+    id: sim.id,
+    title: sim.title,
+    description: sim.description,
+    duration: sim.globalTimeLimit,
+    questionsCount: (sim.modules || []).reduce((acc, m) => acc + (m._count?.questions || 0), 0),
+    createdAt: sim.createdAt
+  }));
+
+  return { disponibles: disponiblesFormatted, historial: thetaHistory.slice(-10) };
+};
+
+const getOrCreateProgress = async (userId, schoolId) => {
+  let progress = await prisma.studentProgress.findUnique({
+    where: { studentId: userId },
+    include: {
+      competencies: true,
+      thetaHistory: { orderBy: { recordedAt: 'asc' } }
     }
+  });
 
-    const courseId = studentRecord.courses[0];
-    
-    const courseStudents = await Student.find({ courses: courseId })
-      .select('user')
-      .lean();
-
-    const studentUserIds = courseStudents.map(s => s.user);
-
-    const allProgress = await StudentProgress.find({
-      student: { $in: studentUserIds }
-    })
-      .select('student currentTheta')
-      .sort({ currentTheta: -1 })
-      .lean();
-
-    const position = allProgress.findIndex(p => 
-      p.student.toString() === userId.toString()
-    ) + 1;
-
-    const total = allProgress.length;
-    const percentageAbove = total > 0 
-      ? ((total - position) / total * 100).toFixed(1)
-      : 0;
-
-    return { position, total, percentageAbove };
+  if (!progress) {
+    progress = await prisma.studentProgress.create({
+      data: { studentId: userId, schoolId, currentTheta: 0, globalScore: 0, percentile: 50 },
+      include: { competencies: true, thetaHistory: true }
+    });
   }
 
-  _getTotalPreguntas(progress) {
-    return progress?.historialTheta?.reduce((sum, h) => sum + (h.totalPreguntas || 0), 0) || 0;
-  }
+  return progress;
+};
 
-  _getThetaLevel(theta) {
-    if (theta >= 2) return 'Avanzado';
-    if (theta >= 1) return 'Intermedio-Alto';
-    if (theta >= 0) return 'Intermedio';
-    if (theta >= -1) return 'Básico';
-    return 'Inicial';
-  }
+const getDashboardData = async (userId, schoolId) => {
+  const [userRecord, studentRecord] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, role: true } }),
+    prisma.student.findUnique({ where: { userId } })
+  ]);
 
-  _thetaToPercentile(theta) {
-    const percentile = 50 + (theta * 34);
-    return Math.max(0, Math.min(100, Math.round(percentile)));
-  }
-}
+  if (!userRecord) throw new Error('Usuario no encontrado');
 
-module.exports = new StudentDashboardService();
+  const progress = await getOrCreateProgress(userId, schoolId);
+
+  const [courseInfo, simulacrosInfo, ranking] = await Promise.all([
+    studentRecord
+      ? prisma.courseEnrollment.findFirst({
+          where: { studentId: studentRecord.id },
+          include: { course: { select: { id: true, name: true, grade: true } } }
+        }).then((e) => e?.course || null)
+      : Promise.resolve(null),
+    getSimulacrosInfo({ studentRecord, userId, schoolId }),
+    getRankingPosition({ userId, schoolId, studentRecord })
+  ]);
+
+  const thetaHistory = progress.thetaHistory || [];
+  const competencias = formatCompetencias(progress.competencies);
+  const tendencia = calculateTendencia(thetaHistory);
+  const alertas = generateAlertas(progress, tendencia);
+
+  return {
+    student: {
+      id: userRecord.id,
+      name: userRecord.name,
+      email: userRecord.email,
+      grade: studentRecord?.grade || 'No asignado',
+      courseName: courseInfo?.name || 'Sin curso'
+    },
+    metrics: {
+      currentTheta: progress.currentTheta || 0,
+      globalScore: progress.globalScore || 0,
+      percentile: progress.percentile || 50,
+      simulacrosCompletados: progress.simulacrosCompletados || 0,
+      racha: progress.rachaActual || 0,
+      totalPreguntas: 0
+    },
+    competencias,
+    tendencia: {
+      direction: tendencia.direction,
+      change: tendencia.change,
+      lastFive: thetaHistory.slice(-5).map((h) => ({ theta: h.theta, date: h.recordedAt }))
+    },
+    alertas,
+    ranking: {
+      position: ranking.position,
+      total: ranking.total,
+      percentageAbove: ranking.percentageAbove
+    },
+    simulacrosDisponibles: simulacrosInfo.disponibles,
+    historialReciente: simulacrosInfo.historial,
+    lastUpdate: new Date(),
+    nextSimulacro: simulacrosInfo.disponibles[0] || null
+  };
+};
+
+module.exports = { getDashboardData };
