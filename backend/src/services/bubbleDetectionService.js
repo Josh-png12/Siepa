@@ -21,6 +21,44 @@ const loadImage = (...args) => getCanvasLib().loadImage(...args);
 const { renderPageToImage } = require('./pdfOcrService');
 const omrCoords = require('../config/omrCoordinates.json');
 
+// ─── Python OCR microservice ───────────────────────────────────────────────────
+
+const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8001';
+const OCR_TIMEOUT_MS = 3000;
+
+/**
+ * Sends `imageBuffer` to the Python FastAPI+OpenCV microservice.
+ * Returns { bubbleMatrix, qrToken } on success; throws on any failure.
+ */
+const callPythonOcrService = async (imageBuffer, { dpi = 200 } = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
+
+  try {
+    const blob = new Blob([imageBuffer], { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', blob, 'sheet.png');
+
+    const res = await fetch(`${OCR_SERVICE_URL}/process-sheet?dpi=${dpi}`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      throw new Error(`Python OCR service HTTP ${res.status}`);
+    }
+
+    const { bubbleMatrix, qrToken, corrected, confidence } = await res.json();
+    console.log(
+      `[OMR] Python OpenCV service — corrected=${corrected} confidence=${confidence}`
+    );
+    return { bubbleMatrix, qrToken };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 // Pixels below this luminance (0–255) are treated as "filled/dark".
 const DARK_THRESHOLD = Number(process.env.OMR_DARK_THRESHOLD || 128);
 
@@ -121,6 +159,33 @@ const readQrFromImageData = (imageData) => {
  * @param {number} opts.numOptions     - Options per question (default from omrCoordinates.json)
  */
 const detectBubblesInImage = async (imageBuffer, { dpi = 200, totalQuestions = null, numOptions = null } = {}) => {
+  // ── Try Python microservice first ────────────────────────────────────────────
+  try {
+    const result = await callPythonOcrService(imageBuffer, { dpi });
+    // Respect totalQuestions / numOptions overrides if provided
+    const nQ = totalQuestions || (omrCoords.columns * omrCoords.questionsPerColumn);
+    const nOpts = numOptions || omrCoords.numOptions || 5;
+    const matrix = result.bubbleMatrix
+      .filter((r) => r.questionNumber <= nQ)
+      .map((r) => ({
+        questionNumber: r.questionNumber,
+        optionsDensity: r.optionsDensity.slice(0, nOpts)
+      }));
+    return { bubbleMatrix: matrix, qrToken: result.qrToken };
+  } catch (err) {
+    const isUnavailable =
+      err.name === 'AbortError' ||
+      err.code === 'ECONNREFUSED' ||
+      (err.message && (err.message.includes('fetch failed') || err.message.includes('ECONNREFUSED')));
+    if (isUnavailable) {
+      console.log(`[OMR] Python OCR service unavailable (${err.message}) — using canvas fallback`);
+    } else {
+      console.warn(`[OMR] Python OCR service error (${err.message}) — using canvas fallback`);
+    }
+  }
+
+  // ── Canvas fallback (original implementation) ────────────────────────────────
+  console.log('[OMR] Using canvas bubble detection');
   const nOpts = numOptions || omrCoords.numOptions || 5;
   const nQ = totalQuestions || (omrCoords.columns * omrCoords.questionsPerColumn);
 
