@@ -1,7 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
-// canvas is a native module — try the pre-built @napi-rs/canvas first (Node 18-24 prebuilt binaries
-// available on all platforms), then fall back to the original canvas package.
+require('../utils/canvasShim');
 let _canvasLib;
 const getCanvasLib = () => {
   if (_canvasLib) return _canvasLib;
@@ -61,6 +60,62 @@ const callPythonOcrService = async (imageBuffer, { dpi = 200 } = {}) => {
 
 // Pixels below this luminance (0–255) are treated as "filled/dark".
 const DARK_THRESHOLD = Number(process.env.OMR_DARK_THRESHOLD || 128);
+
+// Density range where canvas pixel analysis is uncertain — Gemini verifies these.
+const GEMINI_DOUBT_MIN = 0.35;
+const GEMINI_DOUBT_MAX = 0.55;
+const GEMINI_VISION_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_BUBBLE_TIMEOUT_MS = 5000;
+
+const callGeminiForBubble = async (canvas, cx, cy, radiusPx) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const pad = Math.ceil(radiusPx * 2);
+    const sx = Math.max(0, cx - pad);
+    const sy = Math.max(0, cy - pad);
+    const sw = Math.min(canvas.width - sx, pad * 2);
+    const sh = Math.min(canvas.height - sy, pad * 2);
+    if (sw <= 0 || sh <= 0) return null;
+
+    const cropCanvas = createCanvas(sw, sh);
+    const cropCtx = cropCanvas.getContext('2d');
+    cropCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    const base64 = cropCanvas.toBuffer('image/png').toString('base64');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GEMINI_BUBBLE_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(`${GEMINI_VISION_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: '¿Está la burbuja circular en el centro de esta imagen marcada con lápiz o bolígrafo? Responde SOLO: MARCADA o BLANCO' },
+              { inline_data: { mime_type: 'image/png', data: base64 } }
+            ]
+          }],
+          generationConfig: { temperature: 0, maxOutputTokens: 10 }
+        }),
+        signal: controller.signal
+      });
+
+      if (!res.ok) return null;
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
+      if (text.includes('MARCADA')) return 0.8;
+      if (text.includes('BLANCO')) return 0.1;
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_err) {
+    return null;
+  }
+};
 
 // Minimum fraction of non-transparent pixels needed to trust a bubble sample.
 const MIN_COVERAGE = 0.5;
@@ -225,16 +280,33 @@ const detectBubblesInImage = async (imageBuffer, { dpi = 200, totalQuestions = n
 
   // ── Bubble scanning ──────────────────────────────────────────────────────────
   const bubbleMatrix = [];
+  let geminiResolved = 0;
+  let canvasResolved = 0;
 
   for (let q = 1; q <= nQ; q++) {
     const optionsDensity = [];
     for (let i = 0; i < nOpts; i++) {
       const { x, y } = computeBubbleCenter(q, i, dpi);
-      const density = sampleCircleDensity(imageData, x, y, radiusPx);
+      let density = sampleCircleDensity(imageData, x, y, radiusPx);
+
+      if (density >= GEMINI_DOUBT_MIN && density <= GEMINI_DOUBT_MAX) {
+        const geminiDensity = await callGeminiForBubble(canvas, x, y, radiusPx);
+        if (geminiDensity !== null) {
+          density = geminiDensity;
+          geminiResolved++;
+        } else {
+          canvasResolved++;
+        }
+      } else {
+        canvasResolved++;
+      }
+
       optionsDensity.push(Number(density.toFixed(4)));
     }
     bubbleMatrix.push({ questionNumber: q, optionsDensity });
   }
+
+  console.log(`[OMR] Bubble resolution: ${canvasResolved} by canvas, ${geminiResolved} by Gemini`);
 
   return { bubbleMatrix, qrToken };
 };
@@ -253,12 +325,7 @@ const detectBubblesInImage = async (imageBuffer, { dpi = 200, totalQuestions = n
  */
 const generatePagePayloads = async (pdfPath, { dpi = 200, totalQuestions = null, numOptions = null } = {}) => {
   // Load PDF to find page count (reuse pdfjs-dist already loaded by pdfOcrService)
-  let pdfjsLib;
-  try {
-    pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
-  } catch (_error) {
-    pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  }
+  const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 
   const buffer = await fs.readFile(pdfPath);
   const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;

@@ -1,18 +1,20 @@
 const multer = require('multer');
 const ApiError = require('../utils/ApiError');
-const SystemConfig = require('../models/SystemConfig');
+const prisma = require('../config/prisma');
 
 const defaultMaxUploadMB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 
-const resolveInstitutionId = (req) =>
-  String(req.institutionId || req.user?.institutionId || 'default').trim() || 'default';
-
 const getMaxUploadMB = async (req) => {
-  const institutionId = resolveInstitutionId(req);
-  const config = await SystemConfig.findOne({ institutionId }).select('maxUploadMB').lean();
+  const schoolId = req.user?.schoolId;
+  if (!schoolId) return defaultMaxUploadMB;
+
+  const config = await prisma.systemConfig.findUnique({
+    where: { schoolId },
+    select: { maxUploadMB: true }
+  });
+
   const parsed = Number(config?.maxUploadMB);
-  if (!Number.isFinite(parsed) || parsed <= 0) return defaultMaxUploadMB;
-  return parsed;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultMaxUploadMB;
 };
 
 const createPdfFileFilter = (_req, file, cb) => {
@@ -24,19 +26,13 @@ const createPdfFileFilter = (_req, file, cb) => {
 
 const createSingleUpload = (maxUploadMB) => multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: maxUploadMB * 1024 * 1024,
-    files: 1
-  },
+  limits: { fileSize: maxUploadMB * 1024 * 1024, files: 1 },
   fileFilter: createPdfFileFilter
 }).single('file');
 
 const createBatchUpload = (maxUploadMB) => multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: maxUploadMB * 1024 * 1024,
-    files: 2
-  },
+  limits: { fileSize: maxUploadMB * 1024 * 1024, files: 2 },
   fileFilter: createPdfFileFilter
 }).fields([
   { name: 'questionsPdf', maxCount: 1 },
@@ -51,7 +47,7 @@ const runPdfUpload = async (req, res, next) => {
     pdfUpload(req, res, (error) => {
       if (error) {
         if (error.code === 'LIMIT_FILE_SIZE') {
-          return next(new ApiError(400, 'ValidationError', [`questionsPdf supera ${maxUploadMB}MB`]));
+          return next(new ApiError(400, 'ValidationError', [`El archivo supera ${maxUploadMB}MB`]));
         }
         return next(error);
       }
@@ -65,28 +61,28 @@ const runPdfUpload = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  runPdfUpload,
-  runPdfBatchUpload: async (req, res, next) => {
-    let maxUploadMB = defaultMaxUploadMB;
-    try {
-      maxUploadMB = await getMaxUploadMB(req);
-    } catch (_error) {
-      maxUploadMB = defaultMaxUploadMB;
-    }
-    const pdfBatchUpload = createBatchUpload(maxUploadMB);
-
-    pdfBatchUpload(req, res, (error) => {
-      if (error) {
-        if (error.code === 'LIMIT_FILE_SIZE') {
-          return next(new ApiError(400, 'ValidationError', [`questionsPdf supera ${maxUploadMB}MB`]));
-        }
-        return next(error);
-      }
-      if (!req.files?.questionsPdf?.[0]) {
-        return next(new ApiError(400, 'ValidationError', ['questionsPdf es requerido']));
-      }
-      return next();
-    });
+const runPdfBatchUpload = async (req, res, next) => {
+  let maxUploadMB = defaultMaxUploadMB;
+  try {
+    maxUploadMB = await getMaxUploadMB(req);
+  } catch (_error) {
+    maxUploadMB = defaultMaxUploadMB;
   }
+
+  const pdfBatchUpload = createBatchUpload(maxUploadMB);
+
+  pdfBatchUpload(req, res, (error) => {
+    if (error) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return next(new ApiError(400, 'ValidationError', [`questionsPdf supera ${maxUploadMB}MB`]));
+      }
+      return next(error);
+    }
+    if (!req.files?.questionsPdf?.[0]) {
+      return next(new ApiError(400, 'ValidationError', ['questionsPdf es requerido']));
+    }
+    return next();
+  });
 };
+
+module.exports = { runPdfUpload, runPdfBatchUpload };

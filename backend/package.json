@@ -38,7 +38,7 @@
     "multer": "2.0.2",
     "pdf-parse": "^1.1.1",
     "pdf2pic": "3.2.0",
-    "pdfjs-dist": "^4.8.69",
+    "pdfjs-dist": "^2.16.105",
     "qrcode": "^1.5.4",
     "rate-limiter-flexible": "2.4.1",
     "tesseract.js": "^6.0.1",

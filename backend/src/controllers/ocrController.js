@@ -92,11 +92,58 @@ const archiveTeacherOcr = asyncHandler(async (req, res) => {
   });
 });
 
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const BUBBLE_PROMPT = '¿Está la burbuja en esta imagen marcada (rellena) o en blanco? Responde solo: MARCADA o BLANCO';
+
+const verifyBubble = asyncHandler(async (req, res) => {
+  const { image, mimeType = 'image/png' } = req.body || {};
+
+  if (!image || typeof image !== 'string') {
+    throw new ApiError(400, 'ValidationError', ['Se requiere el campo image en base64']);
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new ApiError(500, 'ConfigError', ['GEMINI_API_KEY no configurada']);
+  }
+
+  const geminiRes = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: BUBBLE_PROMPT },
+          { inline_data: { mime_type: String(mimeType), data: image } }
+        ]
+      }],
+      generationConfig: { temperature: 0, maxOutputTokens: 10 }
+    })
+  });
+
+  if (!geminiRes.ok) {
+    const body = await geminiRes.text().catch(() => '');
+    throw new ApiError(502, 'GeminiError', [`Gemini ${geminiRes.status}: ${body}`]);
+  }
+
+  const data = await geminiRes.json();
+  const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
+
+  const marked = text.includes('MARCADA');
+  const isExact = text === 'MARCADA' || text === 'BLANCO';
+
+  return successResponse(res, {
+    data: { marked, confidence: isExact ? 'high' : 'low' },
+    message: 'Bubble verification complete'
+  });
+});
+
 module.exports = {
   listTeacherOcr,
   getTeacherOcrDetail,
   uploadTeacherOcr,
   reviewTeacherOcr,
   publishTeacherOcr,
-  archiveTeacherOcr
+  archiveTeacherOcr,
+  verifyBubble
 };

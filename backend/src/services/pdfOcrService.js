@@ -1,16 +1,13 @@
 ﻿const fs = require('fs/promises');
 const path = require('path');
 const ApiError = require('../utils/ApiError');
+require('../utils/canvasShim');
 
-const loadPdfJs = async () => {
+const loadPdfJs = () => {
   try {
     return require('pdfjs-dist/legacy/build/pdf.js');
   } catch (_error) {
-    try {
-      return await import('pdfjs-dist/legacy/build/pdf.mjs');
-    } catch (_error2) {
-      throw new ApiError(500, 'DependencyMissing', ['pdfjs-dist no esta instalado']);
-    }
+    throw new ApiError(500, 'DependencyMissing', ['pdfjs-dist no esta instalado']);
   }
 };
 
@@ -76,29 +73,38 @@ const ocrImage = async ({ imagePath, lang = 'spa+eng', timeoutMs = 45000 }) => {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
   } catch (_imageError) {
-    canvas = null;
+    // PNG is unreadable — likely corrupt output from a JBIG2/JPEG2000 page.
+    // Passing the same corrupt buffer to Tesseract would crash its internal Worker
+    // via MessagePort (uncatchable). Return empty text immediately.
+    return { text: '', timedOut: false };
   }
 
-  const primaryInput = canvas || imageBuffer;
+  const isReadImageErr = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return msg.includes('read image') || msg.includes('failed to load image');
+  };
 
   try {
-    const result = await Promise.race([tesseract.recognize(primaryInput, lang), timeoutPromise]);
+    const result = await Promise.race([tesseract.recognize(canvas, lang), timeoutPromise]);
     return {
       text: String(result?.data?.text || '').trim(),
       timedOut: Boolean(result?.__timeout)
     };
   } catch (firstError) {
+    if (isReadImageErr(firstError)) return { text: '', timedOut: false };
     // Fallback path for environments where direct recognize() input handling differs.
     if (typeof tesseract.createWorker !== 'function') throw firstError;
 
     const worker = await tesseract.createWorker(lang);
     try {
-      const fallbackInput = canvas || imageBuffer;
-      const result = await Promise.race([worker.recognize(fallbackInput), timeoutPromise]);
+      const result = await Promise.race([worker.recognize(canvas), timeoutPromise]);
       return {
         text: String(result?.data?.text || '').trim(),
         timedOut: Boolean(result?.__timeout)
       };
+    } catch (fallbackError) {
+      if (isReadImageErr(fallbackError)) return { text: '', timedOut: false };
+      throw fallbackError;
     } finally {
       await worker.terminate().catch(() => {});
     }

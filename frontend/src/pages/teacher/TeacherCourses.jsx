@@ -45,7 +45,7 @@ function TeacherCourses() {
       {/* Cards de Cursos */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
         {courses.map(course => (
-          <div key={course._id} className="bg-white rounded-3xl p-8 shadow hover:shadow-2xl transition cursor-pointer" onClick={() => irAGestionar(course._id)}>
+          <div key={course.id} className="bg-white rounded-3xl p-8 shadow hover:shadow-2xl transition cursor-pointer" onClick={() => irAGestionar(course.id)}>
             <h3 className="text-2xl font-bold mb-2">#{course.name}</h3>
             <p className="text-gray-500 mb-6">{course.grade}</p>
             <div className="flex items-center gap-4 mb-6">
@@ -81,14 +81,14 @@ function TeacherCourses() {
           </thead>
           <tbody>
             {courses.map(course => (
-              <tr key={course._id} className="border-b hover:bg-gray-50">
+              <tr key={course.id} className="border-b hover:bg-gray-50">
                 <td className="py-4">#{course.name}</td>
                 <td className="py-4">{course.grade}</td>
-                <td className="py-4">{course.students?.length || 0}</td>
-                <td className="py-4">{course.averageTheta?.toFixed(2) || 0}</td>
+                <td className="py-4">{course.studentCount || 0}</td>
+                <td className="py-4">{Number(course.averageTheta || 0).toFixed(2)}</td>
                 <td className="py-4"><span className="text-green-600">Activo</span></td>
                 <td className="py-4">
-                  <button onClick={() => irAGestionar(course._id)} className="bg-blue-600 text-white px-6 py-2 rounded-2xl font-medium">
+                  <button onClick={() => irAGestionar(course.id)} className="bg-blue-600 text-white px-6 py-2 rounded-2xl font-medium">
                     Gestionar
                   </button>
                 </td>

@@ -5,7 +5,8 @@ const { generateTeacherCourseReportPdf } = require('../services/teacherReportPdf
 const getDashboardInsights = async (req, res) => {
   try {
     const data = await teacherInsightsService.getDashboardInsights({
-      teacherId: req.user.id
+      teacherId: req.user.id,
+      schoolId: req.user.schoolId
     });
     return successResponse(res, { data });
   } catch (error) {
@@ -20,7 +21,8 @@ const getCourseInsights = async (req, res) => {
   try {
     const data = await teacherInsightsService.getCourseInsights({
       courseId: req.params.courseId,
-      teacherId: req.user.id
+      teacherId: req.user.id,
+      schoolId: req.user.schoolId
     });
     return successResponse(res, { data });
   } catch (error) {
@@ -35,7 +37,8 @@ const getCourseReportPdf = async (req, res) => {
   try {
     const insights = await teacherInsightsService.getCourseInsights({
       courseId: req.params.courseId,
-      teacherId: req.user.id
+      teacherId: req.user.id,
+      schoolId: req.user.schoolId
     });
     const pdfBuffer = generateTeacherCourseReportPdf({
       insights,

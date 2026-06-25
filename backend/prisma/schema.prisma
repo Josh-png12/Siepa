@@ -537,6 +537,7 @@ model SimulacroAnswer {
   simulacroQuestion   SimulacroQuestion @relation(fields: [simulacroQuestionId], references: [id])
   selectedOption      String?
   isCorrect           Boolean?
+  aiExplanation       String?           // cached DeepSeek explanation for wrong answers
 
   @@index([resultId])
   @@index([simulacroQuestionId])

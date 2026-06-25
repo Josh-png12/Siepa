@@ -94,7 +94,7 @@ function Login() {
 
     try {
       setLoading(true);
-      const response = await login({ email: form.email.trim(), password: form.password });
+      const response = await login({ email: form.email.trim(), password: form.password, schoolSlug: 'demo' });
       const payload = response?.data?.data || {};
       const authUser = payload.user;
       const authToken = payload.token;

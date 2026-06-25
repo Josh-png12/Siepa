@@ -66,14 +66,22 @@ const registerUser = async ({ name, email, password, role, schoolSlug = 'default
 const loginUser = async ({ email, password, schoolSlug }) => {
   const safeEmail = String(email || '').trim().toLowerCase();
   const safePassword = String(password || '');
-  const safeSlug = String(schoolSlug || 'default').trim() || 'default';
+  const safeSlug = String(schoolSlug || '').trim();
 
-  const school = await prisma.school.findUnique({ where: { slug: safeSlug } });
-  if (!school) throw new Error('INVALID_CREDENTIALS');
+  let user = null;
 
-  const user = await prisma.user.findFirst({
-    where: { email: safeEmail, schoolId: school.id }
-  });
+  // Try scoped lookup first (slug → school → user)
+  if (safeSlug) {
+    const school = await prisma.school.findUnique({ where: { slug: safeSlug } });
+    if (school) {
+      user = await prisma.user.findFirst({ where: { email: safeEmail, schoolId: school.id } });
+    }
+  }
+
+  // Dev-friendly fallback: find by email alone when no slug sent or slug not found
+  if (!user) {
+    user = await prisma.user.findFirst({ where: { email: safeEmail } });
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[auth.service.login] user_found:', Boolean(user));

@@ -1,24 +1,28 @@
+process.on('uncaughtException', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[FATAL] Puerto ${err.port || process.env.PORT || 5000} ya en uso. Ejecuta: npx kill-port ${err.port || process.env.PORT || 5000}`);
+    process.exit(1);
+  }
+  console.error('[UNCAUGHT EXCEPTION]', err.message);
+  console.error(err.stack);
+  // No llamar process.exit() para que el error sea visible antes de que nodemon reinicie
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+
 // backend/src/app.js
 const express = require('express');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
-const connectDB = require('./config/db');
+
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 
 dotenv.config();
 const app = express();
-
-process.on('uncaughtException', (error) => {
-  console.error('[uncaughtException]', error);
-  setTimeout(() => process.exit(1), 50);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason);
-  setTimeout(() => process.exit(1), 50);
-});
 
 const nodeMajor = Number(String(process.versions.node || '0').split('.')[0]);
 if (nodeMajor !== 20) {
@@ -62,9 +66,6 @@ app.use((req, res, next) => {
     }));
 });
 
-// ======================= CONEXION A MONGODB =======================
-connectDB();
-
 // ======================= RUTAS =======================
 const authRoutes        = require('./routes/authRoutes');
 const questionRoutes    = require('./routes/questionRoutes');
@@ -79,6 +80,8 @@ const adminRoutes       = require('./routes/adminRoutes');
 const teacherOcrRoutes  = require('./routes/teacherOcrRoutes');
 const teacherPdfImportRoutes = require('./routes/teacherPdfImportRoutes');
 const adminPdfImportRoutes = require('./routes/adminPdfImportRoutes');
+const aiRoutes              = require('./routes/aiRoutes');
+const ocrRoutes             = require('./routes/ocrRoutes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorMiddleware');
 
 app.use('/api/auth',        authRoutes);
@@ -94,6 +97,8 @@ app.use('/api/simulacros',  simulacroRoutes);
 app.use('/api/courses',     courseRoutes);
 app.use('/api/admin',       adminRoutes);
 app.use('/api/admin/pdf-import', adminPdfImportRoutes);
+app.use('/api/ai',          aiRoutes);
+app.use('/api/ocr',         ocrRoutes);
 
 // ======================= RUTA DE PRUEBA =======================
 app.get('/', (req, res) => {
@@ -105,6 +110,16 @@ app.use(errorHandler);
 
 // ======================= INICIO DEL SERVIDOR =======================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
+// Graceful shutdown — lets nodemon/PM2 release the port before restart
+const shutdown = (signal) => {
+  console.log(`[${signal}] Cerrando servidor...`);
+  server.close(() => process.exit(0));
+  // Force-kill after 5 s if connections stay open
+  setTimeout(() => process.exit(0), 5000).unref();
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));

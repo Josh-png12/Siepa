@@ -119,6 +119,7 @@ function PdfImport() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [importDone, setImportDone] = useState(false);
   const [ocrBadge, setOcrBadge] = useState(false);
+  const [useVision, setUseVision] = useState(true);
 
   const [filterArea, setFilterArea] = useState('');
   const [filterFlag, setFilterFlag] = useState('');
@@ -186,6 +187,7 @@ function PdfImport() {
     fd.append('sessionName', String(config.sessionName || ''));
     fd.append('grade', String(config.grade || ''));
     fd.append('year', String(config.year || ''));
+    fd.append('useVision', String(useVision));
     return fd;
   };
 
@@ -215,6 +217,7 @@ function PdfImport() {
       setImportDone(false);
       setUploadProgress(0);
 
+      console.log('[FRONTEND] useVision:', useVision);
       const response = await teacherPreviewPdfImport(buildPreviewFormData(), {
         onUploadProgress: (evt) => {
           if (!evt.total) return;
@@ -375,6 +378,36 @@ function PdfImport() {
     }
   };
 
+  const handleReset = async () => {
+    if (pollingRef.current) {
+      window.clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (ocrJob.jobId) {
+      try { await teacherCancelPreviewPdfImportJob(ocrJob.jobId); } catch (_) {}
+    }
+    setQuestionsPdf(null);
+    setAnswersPdf(null);
+    setConfig(initialConfig);
+    setPreview(null);
+    setRows([]);
+    setBatchId('');
+    setLoadingPreview(false);
+    setLoadingImport(false);
+    setUploadProgress(0);
+    setOcrJob({ jobId: '', status: '', progress: { currentPage: 0, totalPages: 0, percent: 0 } });
+    setErrorList([]);
+    setToast({ type: 'info', message: '' });
+    setConfirmOpen(false);
+    setImportDone(false);
+    setOcrBadge(false);
+    setFilterArea('');
+    setFilterFlag('');
+    setFilterPage('');
+    setBulkArea('');
+    setBulkCompetencia('');
+  };
+
   const toggleSelectAllFiltered = (checked) => {
     const visible = new Set(filteredRows.map((row) => row.number));
     setRows((prev) => prev.map((row) => (visible.has(row.number) ? { ...row, selected: checked } : row)));
@@ -450,7 +483,17 @@ function PdfImport() {
             <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Grado" value={config.grade} onChange={(e) => updateConfig('grade', e.target.value)} />
             <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Año" value={config.year} onChange={(e) => updateConfig('year', e.target.value)} />
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <label className="mt-4 flex cursor-pointer items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100">
+            <input
+              type="checkbox"
+              checked={useVision}
+              onChange={(e) => setUseVision(e.target.checked)}
+              disabled={loadingPreview || loadingImport}
+              className="h-4 w-4 accent-violet-600"
+            />
+            <span className="font-medium">Usar visión IA (Gemini) — recomendado para PDFs escaneados</span>
+          </label>
+          <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" onClick={onPreview} disabled={loadingPreview || loadingImport} className="rounded-lg bg-[#0A2E57] px-4 py-2 text-sm text-white disabled:opacity-60">
               {loadingPreview ? 'Previsualizando...' : 'Previsualizar'}
             </button>
@@ -460,6 +503,15 @@ function PdfImport() {
             {importDone ? (
               <button type="button" onClick={() => navigate('/dashboard/docente/preguntas')} className="rounded-lg bg-slate-100 px-4 py-2 text-sm text-slate-700">
                 Ver preguntas importadas
+              </button>
+            ) : null}
+            {(ocrJob.jobId || preview || errorList.length > 0 || batchId) ? (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+              >
+                Limpiar / Nueva importación
               </button>
             ) : null}
           </div>
@@ -662,26 +714,36 @@ function PdfImport() {
           <p className="text-sm text-blue-800">
             OCR en progreso: página {ocrJob.progress.currentPage} de {ocrJob.progress.totalPages} ({ocrJob.progress.percent}%)
           </p>
-          <button
-            type="button"
-            className="mt-2 rounded-lg bg-blue-700 px-3 py-2 text-sm text-white"
-            onClick={async () => {
-              try {
-                await teacherCancelPreviewPdfImportJob(ocrJob.jobId);
-              } catch (_error) {
-                // noop
-              }
-              if (pollingRef.current) {
-                window.clearInterval(pollingRef.current);
-                pollingRef.current = null;
-              }
-              setOcrJob({ jobId: '', status: '', progress: { currentPage: 0, totalPages: 0, percent: 0 } });
-              setLoadingPreview(false);
-              setToast({ type: 'info', message: 'Cancelación solicitada.' });
-            }}
-          >
-            Cancelar OCR
-          </button>
+          <p className="mt-1 text-xs text-blue-600">Job: {ocrJob.jobId}</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-blue-700 px-3 py-2 text-sm text-white"
+              onClick={async () => {
+                try {
+                  await teacherCancelPreviewPdfImportJob(ocrJob.jobId);
+                } catch (_error) {
+                  // noop
+                }
+                if (pollingRef.current) {
+                  window.clearInterval(pollingRef.current);
+                  pollingRef.current = null;
+                }
+                setOcrJob({ jobId: '', status: '', progress: { currentPage: 0, totalPages: 0, percent: 0 } });
+                setLoadingPreview(false);
+                setToast({ type: 'info', message: 'Cancelación solicitada.' });
+              }}
+            >
+              Cancelar OCR
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+              onClick={handleReset}
+            >
+              Limpiar / Nueva importación
+            </button>
+          </div>
         </div>
       ) : null}
 

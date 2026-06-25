@@ -84,7 +84,7 @@ function AdminUsers() {
 
   const toggleFeature = async (user, key) => {
     const current = Boolean(user.features?.[key]);
-    await adminPatchUser(user._id, { features: { ...user.features, [key]: !current } });
+    await adminPatchUser(user.id, { features: { ...user.features, [key]: !current } });
     setToast({ type: 'success', message: `Feature ${key} actualizada.` });
     load();
   };
@@ -93,7 +93,7 @@ function AdminUsers() {
     if (!resetUser || resetLoading) return;
     try {
       setResetLoading(true);
-      await adminResetUserPassword(resetUser._id, newPassword);
+      await adminResetUserPassword(resetUser.id, newPassword);
       setToast({ type: 'success', message: 'Contrasena restablecida exitosamente.' });
       setResetUser(null);
       await load();
@@ -164,9 +164,9 @@ function AdminUsers() {
           <h2 className={adminTokens.classes.sectionHeader}>Crear usuario</h2>
           <input placeholder="Nombre" className={`${adminTokens.classes.input} w-full`} value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} />
           {formErrors.name ? <p className="text-xs text-red-600">{formErrors.name}</p> : null}
-          <input placeholder="Email" type="email" className={`${adminTokens.classes.input} w-full`} value={form.email} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} />
+          <input placeholder="Email" type="email" autoComplete="email" className={`${adminTokens.classes.input} w-full`} value={form.email} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} />
           {formErrors.email ? <p className="text-xs text-red-600">{formErrors.email}</p> : null}
-          <input placeholder="Password" type="password" className={`${adminTokens.classes.input} w-full`} value={form.password} onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} autoComplete="current-password" />
+          <input placeholder="Password" type="password" className={`${adminTokens.classes.input} w-full`} value={form.password} onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))} autoComplete="new-password" />
           {formErrors.password ? <p className="text-xs text-red-600">{formErrors.password}</p> : null}
           <select className={`${adminTokens.classes.input} w-full`} value={form.role} onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))}>
             <option value="docente">Docente</option>
@@ -226,7 +226,7 @@ function AdminUsers() {
             </thead>
             <tbody>
               {result.items.map((user) => (
-                <tr key={user._id} className="border-t">
+                <tr key={user.id} className="border-t">
                   <td className="p-3">{user.name}</td>
                   <td className="p-3">{user.email}</td>
                   <td className="p-3">{user.role}</td>
@@ -244,9 +244,9 @@ function AdminUsers() {
                     </button>
                   </td>
                   <td className="p-3 space-x-2">
-                    <button type="button" onClick={() => suspend(user._id)} className="px-2 py-1 bg-amber-500 text-white rounded">Suspender</button>
+                    <button type="button" onClick={() => suspend(user.id)} className="px-2 py-1 bg-amber-500 text-white rounded">Suspender</button>
                     <button type="button" onClick={() => setResetUser(user)} className="px-2 py-1 bg-blue-600 text-white rounded">Reset Password</button>
-                    <button type="button" onClick={() => setConfirmDeleteId(user._id)} className="px-2 py-1 bg-red-600 text-white rounded">Eliminar</button>
+                    <button type="button" onClick={() => setConfirmDeleteId(user.id)} className="px-2 py-1 bg-red-600 text-white rounded">Eliminar</button>
                   </td>
                 </tr>
               ))}

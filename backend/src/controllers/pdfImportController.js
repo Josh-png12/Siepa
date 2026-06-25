@@ -9,9 +9,11 @@ const getScopedUser = (req) => ({
 });
 
 const createPdfImport = asyncHandler(async (req, res) => {
+  const useVision = req.body?.useVision === true || req.body?.useVision === 'true';
   const data = await pdfImportService.createPdfImportJob({
     user: getScopedUser(req),
-    file: req.file
+    file: req.file,
+    useVision
   });
 
   return successResponse(res, {
@@ -84,10 +86,12 @@ const getPdfImportConfig = asyncHandler(async (req, res) => {
 });
 
 const previewPdfImportBatch = asyncHandler(async (req, res) => {
+  const useVision = req.body?.useVision === true || req.body?.useVision === 'true';
+  console.log('[BACKEND] useVision recibido:', req.body?.useVision, '→', useVision);
   const data = await pdfImportBatchService.createPreviewBatch({
     user: getScopedUser(req),
     files: req.files || {},
-    payload: req.body || {}
+    payload: { ...(req.body || {}), useVision }
   });
 
   return res.status(202).json({

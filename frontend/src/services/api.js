@@ -447,6 +447,16 @@ export const adminPdfImportUpdatePreview = (id, payload) =>
 export const adminPdfImportConfirm = (id, payload) =>
   api.post(`/admin/pdf-import/${id}/confirm`, payload).then((res) => res.data);
 
+// ==================== AI ====================
+export const aiExplainAnswer = ({ resultId, answerId }) =>
+  api.post('/ai/explain-answer', { resultId, answerId }).then((res) => res.data);
+
+export const generateAIQuestions = ({ area, competencia, dificultad, tema, cantidad }) =>
+  api.post('/ai/generate-questions', { area, competencia, dificultad, tema, cantidad }).then((res) => res.data);
+
+export const createAICaseGroup = ({ titulo, contenido }) =>
+  api.post('/ai/create-case-group', { titulo, contenido }).then((res) => res.data);
+
 // Compatibilidad legacy
 export const addQuestion = createQuestion;
 

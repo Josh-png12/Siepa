@@ -1,13 +1,44 @@
-﻿import { Outlet } from 'react-router-dom';
+import { useState } from 'react';
+import { Outlet } from 'react-router-dom';
 import StudentSidebar from '../../components/student/StudentSidebar';
+import WelcomeTour from './WelcomeTour';
 
 function StudentLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
-    <div className="flex min-h-screen bg-[#f3f7fc]">
-      <StudentSidebar />
-      <main className="flex-1 overflow-auto p-6 md:p-8">
-        <Outlet />
-      </main>
+    <div className="flex min-h-screen bg-[#f0f4fa]">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <StudentSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      <div className="flex flex-1 flex-col min-w-0">
+        {/* Mobile top bar */}
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <span className="font-bold text-[#1e3a5f] tracking-tight">SIEPA</span>
+        </div>
+
+        <main className="flex-1 overflow-auto p-4 md:p-8">
+          <Outlet />
+        </main>
+      </div>
+
+      <WelcomeTour />
     </div>
   );
 }

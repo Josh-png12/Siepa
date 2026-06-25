@@ -269,7 +269,7 @@ const createManualSimulacro = async (payload, user) => {
       schoolId: user.schoolId,
       title,
       description: String(payload.description || '').trim(),
-      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360),
+      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 5, 360),
       strictMode: Boolean(payload.strictMode),
       estado: 'borrador',
       createdById: user.id,
@@ -290,7 +290,7 @@ const createSmartSimulacro = async (payload, user) => {
       schoolId: user.schoolId,
       title,
       description: String(payload.description || '').trim(),
-      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360),
+      globalTimeLimit: parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 5, 360),
       strictMode: Boolean(payload.strictMode),
       estado: 'borrador',
       createdById: user.id,
@@ -353,7 +353,7 @@ const updateSimulacro = async (id, payload, user) => {
   if (payload.description !== undefined) updateData.description = String(payload.description || '').trim();
   if (payload.strictMode !== undefined) updateData.strictMode = Boolean(payload.strictMode);
   if (payload.globalTimeLimit !== undefined) {
-    updateData.globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 30, 360);
+    updateData.globalTimeLimit = parseOptionalLimit(payload.globalTimeLimit, 'globalTimeLimit', 5, 360);
   }
 
   if (payload.modules !== undefined) {

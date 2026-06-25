@@ -6,6 +6,7 @@ import {
   listQuestions,
   publishQuestion
 } from '../../services/api';
+import AIGenerateModal from './AIGenerateModal.jsx';
 import QuestionFilters from './QuestionFilters.jsx';
 
 const defaultFilters = {
@@ -61,6 +62,7 @@ function QuestionsList() {
   const [mappingText, setMappingText] = useState(JSON.stringify(defaultMapping, null, 2));
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   const queryParams = useMemo(() => {
     const params = {
@@ -183,14 +185,30 @@ function QuestionsList() {
 
   return (
     <div className="space-y-6">
+      {aiModalOpen && (
+        <AIGenerateModal
+          onClose={() => setAiModalOpen(false)}
+          onQuestionAdded={loadQuestions}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold text-[#0A2E57]">Question Bank</h1>
-        <button
-          onClick={() => navigate('/dashboard/docente/preguntas/nueva')}
-          className="bg-[#0A2E57] text-white px-4 py-2 rounded-lg"
-        >
-          Nueva pregunta
-        </button>
+        <h1 className="text-3xl font-bold text-[#0A2E57]">Banco de Preguntas</h1>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setAiModalOpen(true)}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            <span>✨</span> Generar con IA
+          </button>
+          <button
+            onClick={() => navigate('/dashboard/docente/preguntas/nueva')}
+            className="bg-[#0A2E57] text-white px-4 py-2 rounded-lg"
+          >
+            Nueva pregunta
+          </button>
+        </div>
       </div>
 
       <QuestionFilters value={filters} onApply={onApplyFilters} onReset={onResetFilters} loading={loading} />

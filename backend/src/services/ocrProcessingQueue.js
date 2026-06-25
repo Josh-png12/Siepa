@@ -24,7 +24,11 @@ class OcrProcessingQueue {
     Promise.resolve()
       .then(() => item.job())
       .then((result) => item.resolve(result))
-      .catch((error) => item.reject(error instanceof Error ? error : new ApiError(500, 'OCR job failed')))
+      .catch((error) => {
+        console.error('[OCR QUEUE ERROR]', error instanceof Error ? error.message : error);
+        if (error instanceof Error) console.error(error.stack);
+        item.reject(error instanceof Error ? error : new ApiError(500, 'OCR job failed'));
+      })
       .finally(() => {
         this.running -= 1;
         this.processNext();

@@ -13,9 +13,9 @@ function flattenQuestions(modules = []) {
 
       flat.push({
         moduleName: moduleItem.name,
-        questionId: moduleQuestion.question?._id || moduleQuestion.question || `embedded-${moduleItem.name}-${moduleQuestion.order}`,
+        questionId: moduleQuestion.question?.id || `embedded-${moduleItem.name}-${moduleQuestion.order}`,
         order: moduleQuestion.order,
-        statementText: source.statement?.text || source.latex || '(sin texto)',
+        statementText: source.statementText || source.statement?.text || source.latex || '(sin texto)',
         options: source.options || []
       });
     });

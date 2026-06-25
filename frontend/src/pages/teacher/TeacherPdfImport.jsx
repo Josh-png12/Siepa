@@ -18,6 +18,7 @@ function TeacherPdfImport() {
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState('');
+  const [useVision, setUseVision] = useState(true);
 
   const load = async () => {
     try {
@@ -45,6 +46,7 @@ function TeacherPdfImport() {
       setError('');
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('useVision', useVision);
       const response = await pdfImportCreate(formData);
       const jobId = response.data?._id;
       if (jobId) {
@@ -67,7 +69,7 @@ function TeacherPdfImport() {
         <p className="mt-1 text-blue-100">Sube un PDF, revisa el preview y confirma la importacion.</p>
       </div>
 
-      <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_auto_auto]">
+      <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_auto_auto_auto]">
         <select
           value={status}
           onChange={(event) => setStatus(event.target.value)}
@@ -82,6 +84,16 @@ function TeacherPdfImport() {
           <option value="failed">failed</option>
         </select>
 
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 hover:bg-violet-100">
+          <input
+            type="checkbox"
+            checked={useVision}
+            onChange={(e) => setUseVision(e.target.checked)}
+            className="h-4 w-4 accent-violet-600"
+          />
+          <span className="whitespace-nowrap font-medium">Usar vision IA (Gemini)</span>
+        </label>
+
         <label className="cursor-pointer rounded-xl bg-[#0A2E57] px-4 py-2 text-center text-white hover:bg-[#123e71]">
           {uploading ? 'Subiendo...' : 'Subir PDF'}
           <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={onUpload} disabled={uploading} />
@@ -95,6 +107,12 @@ function TeacherPdfImport() {
           Recargar
         </button>
       </div>
+
+      {useVision && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-700">
+          Modo vision IA activo. Recomendado para PDFs con graficas e imagenes. Las preguntas se extraen con Gemini 2.0 Flash; debes completar la respuesta correcta en la vista de revision.
+        </div>
+      )}
 
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">{error}</div> : null}
 

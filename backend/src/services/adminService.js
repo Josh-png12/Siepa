@@ -10,6 +10,25 @@ const buildError = (message, status = 400) => {
   return error;
 };
 
+const USER_SELECT = {
+  id: true,
+  schoolId: true,
+  name: true,
+  email: true,
+  role: true,
+  status: true,
+  deletedAt: true,
+  documentType: true,
+  documentNumber: true,
+  grade: true,
+  currentTheta: true,
+  lastActivity: true,
+  featurePhysicalSimulacros: true,
+  featureOcrEnabled: true,
+  createdAt: true,
+  updatedAt: true
+};
+
 // ── USERS ─────────────────────────────────────────────────────────────────────
 
 const listUsers = async ({ schoolId, query }) => {
@@ -44,7 +63,7 @@ const listUsers = async ({ schoolId, query }) => {
   const [items, total] = await Promise.all([
     prisma.user.findMany({
       where,
-      omit: { password: true },
+      select: USER_SELECT,
       orderBy: { createdAt: 'desc' },
       skip,
       take: limit
@@ -65,7 +84,7 @@ const resetUserPassword = async ({ schoolId, userId, newPassword }) => {
   return prisma.user.update({
     where: { id: userId },
     data: { password: hashedPassword },
-    omit: { password: true }
+    select: USER_SELECT
   });
 };
 
@@ -90,7 +109,7 @@ const createUser = async ({ schoolId, payload }) => {
       featurePhysicalSimulacros: Boolean(payload?.features?.physicalSimulacros),
       featureOcrEnabled: payload?.features?.ocrEnabled !== false
     },
-    omit: { password: true }
+    select: USER_SELECT
   });
 
   return user;
@@ -117,7 +136,7 @@ const updateUser = async ({ schoolId, userId, payload }) => {
   return prisma.user.update({
     where: { id: userId },
     data: updateData,
-    omit: { password: true }
+    select: USER_SELECT
   });
 };
 
@@ -128,7 +147,7 @@ const softDeleteUser = async ({ schoolId, userId }) => {
   return prisma.user.update({
     where: { id: userId },
     data: { deletedAt: new Date(), status: 'inactive' },
-    omit: { password: true }
+    select: USER_SELECT
   });
 };
 

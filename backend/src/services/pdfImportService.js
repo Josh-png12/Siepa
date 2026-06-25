@@ -6,6 +6,7 @@ const { logAudit } = require('./auditLogService');
 const pdfImportQueueService = require('./pdfImportQueueService');
 const pdfExtractService = require('./pdfExtractService');
 const pdfQuestionParserService = require('./pdfQuestionParserService');
+const { extractQuestionsFromPdf, mapToPreviewFormat } = require('./pdfQuestionExtractor');
 const {
   parseListQuery,
   validatePreviewQuestions,
@@ -103,12 +104,51 @@ const mapPreviewQuestionToQuestionData = (previewQuestion, user, schoolId) => {
 
 const getAuditPrefix = (user) => (user?.role === 'admin' ? 'admin' : 'teacher');
 
+const processJobWithGemini = async (jobId, job) => {
+  const outputDir = resolveJobDir(job.id);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  await prisma.pdfImportJob.update({
+    where: { id: jobId },
+    data: { status: 'extracting', errors: [] }
+  });
+
+  const { preguntas: geminiQuestions, paginasProcesadas, paginasConPreguntas } = await extractQuestionsFromPdf({
+    filePath: job.sourceFilePath
+  });
+
+  const previewQuestions = mapToPreviewFormat(geminiQuestions);
+
+  const parsedJsonPath = path.join(outputDir, 'parsed.json');
+  await fs.writeFile(parsedJsonPath, JSON.stringify(previewQuestions, null, 2), 'utf8');
+
+  await prisma.pdfImportJob.update({
+    where: { id: jobId },
+    data: {
+      pages: Number(paginasProcesadas || 0),
+      isScanned: true,
+      parsedJsonPath,
+      previewQuestions,
+      previewWarnings: ['Las preguntas extraídas con Gemini Vision no incluyen la respuesta correcta. Complétala en la vista de revisión antes de importar.'],
+      previewStats: { engine: 'gemini-vision', questionCount: previewQuestions.length, paginasProcesadas, paginasConPreguntas },
+      status: 'previewReady'
+    }
+  });
+
+  return prisma.pdfImportJob.findUnique({ where: { id: jobId } });
+};
+
 const processJob = async (jobId) => {
   const job = await prisma.pdfImportJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
   if (!['uploaded', 'extracting', 'parsing'].includes(job.status)) return job;
 
   try {
+    if (job.ocrEngine === 'gemini-vision') {
+      return await processJobWithGemini(jobId, job);
+    }
+
+
     const outputDir = resolveJobDir(job.id);
     await fs.mkdir(outputDir, { recursive: true });
 
@@ -116,6 +156,14 @@ const processJob = async (jobId) => {
       where: { id: jobId },
       data: { status: 'extracting', errors: [] }
     });
+
+    console.log('[PDF IMPORT] Procesando archivo:', job.sourceFilePath);
+    try {
+      const fsSync = require('fs');
+      console.log('[PDF IMPORT] Tamaño al procesar:', fsSync.statSync(job.sourceFilePath).size, 'bytes');
+    } catch (_e) {
+      console.error('[PDF IMPORT] ARCHIVO NO EXISTE al procesar:', job.sourceFilePath);
+    }
 
     const extracted = await pdfExtractService.extract({
       filePath: job.sourceFilePath,
@@ -167,7 +215,7 @@ const processJob = async (jobId) => {
 
 pdfImportQueueService.setProcessor(processJob);
 
-const createPdfImportJob = async ({ user, file }) => {
+const createPdfImportJob = async ({ user, file, useVision = false }) => {
   const schoolId = user.schoolId;
   const sourceName = safeFileName(file.originalname || 'source.pdf');
 
@@ -178,7 +226,8 @@ const createPdfImportJob = async ({ user, file }) => {
       status: 'uploaded',
       sourceOriginalName: sourceName,
       sourceMimeType: file.mimetype || 'application/pdf',
-      sourceSize: Number(file.size || 0)
+      sourceSize: Number(file.size || 0),
+      ...(useVision ? { ocrEngine: 'gemini-vision' } : {})
     }
   });
 
@@ -186,6 +235,10 @@ const createPdfImportJob = async ({ user, file }) => {
   await fs.mkdir(jobDir, { recursive: true });
   const sourcePath = path.join(jobDir, 'source.pdf');
   await fs.writeFile(sourcePath, file.buffer);
+  console.log('[PDF IMPORT] Archivo recibido:', sourcePath);
+  console.log('[PDF IMPORT] Tamaño buffer recibido:', file.buffer.length, 'bytes');
+  const fsSync = require('fs');
+  console.log('[PDF IMPORT] Tamaño en disco:', fsSync.statSync(sourcePath).size, 'bytes');
 
   await prisma.pdfImportJob.update({
     where: { id: created.id },

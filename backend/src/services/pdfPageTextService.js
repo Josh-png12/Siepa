@@ -1,5 +1,6 @@
 ﻿const fs = require('fs/promises');
 const ApiError = require('../utils/ApiError');
+require('../utils/canvasShim');
 
 const normalizePageText = (text) => String(text || '')
   .replace(/\r\n?/g, '\n')
@@ -11,15 +12,11 @@ const normalizePageText = (text) => String(text || '')
 
 const countDensity = (text) => (String(text || '').match(/[A-Za-z0-9]/g) || []).length;
 
-const loadPdfJs = async () => {
+const loadPdfJs = () => {
   try {
     return require('pdfjs-dist/legacy/build/pdf.js');
   } catch (_error) {
-    try {
-      return await import('pdfjs-dist/legacy/build/pdf.mjs');
-    } catch (_error2) {
-      throw new ApiError(500, 'DependencyMissing', ['pdfjs-dist no esta instalado']);
-    }
+    throw new ApiError(500, 'DependencyMissing', ['pdfjs-dist no esta instalado']);
   }
 };
 

@@ -66,12 +66,12 @@ function SimulacroDetail() {
       setError('');
       setSuccess('');
 
-      await updateTeacherSimulacro(simulacro._id, {
+      await updateTeacherSimulacro(simulacro.id, {
         modules: (simulacro.modules || []).map((moduleItem) => ({
           name: moduleItem.name,
           timeLimit: moduleItem.timeLimit || null,
           questions: (moduleItem.questions || []).map((questionItem, idx) => ({
-            question: questionItem.question?._id || questionItem.question || null,
+            question: questionItem.question?.id || null,
             embeddedQuestion: questionItem.embeddedQuestion || null,
             order: idx + 1
           }))
@@ -106,7 +106,7 @@ function SimulacroDetail() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => navigate('/dashboard/docente/simulacros')} className="bg-gray-200 px-4 py-2 rounded-lg">Volver</button>
-          <button onClick={() => navigate(`/dashboard/docente/simulacros/${simulacro._id}/resultados`)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
+          <button onClick={() => navigate(`${simulacro.id}/resultados`)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
             Ver resultados
           </button>
         </div>
@@ -130,13 +130,13 @@ function SimulacroDetail() {
           </h2>
 
           {(moduleItem.questions || []).map((item, index) => (
-            <div key={`${item.question?._id || 'embedded'}-${index}`} className="border rounded-lg p-3 flex items-start justify-between gap-3">
+            <div key={`${item.question?.id || 'embedded'}-${index}`} className="border rounded-lg p-3 flex items-start justify-between gap-3">
               <div>
                 <p className="font-medium">#{index + 1}</p>
                 <p className="text-sm text-gray-700">
                   {item.question
-                    ? item.question.statement?.text || item.question.latex || '(sin texto)'
-                    : item.embeddedQuestion?.statement?.text || item.embeddedQuestion?.latex || '(inline sin texto)'}
+                    ? item.question.statementText || item.question.statement?.text || item.question.latex || '(sin texto)'
+                    : item.embeddedQuestion?.statementText || item.embeddedQuestion?.statement?.text || item.embeddedQuestion?.latex || '(inline sin texto)'}
                 </p>
               </div>
 

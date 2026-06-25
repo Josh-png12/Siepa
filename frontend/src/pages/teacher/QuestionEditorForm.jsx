@@ -5,6 +5,12 @@ const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 const AREA_OPTIONS = ['matematicas', 'lectura', 'ciencias', 'sociales', 'ingles'];
 const NIVEL_OPTIONS = ['recordar', 'comprender', 'aplicar', 'analizar', 'evaluar', 'crear'];
 
+const DIFICULTAD_PILLS = [
+  { value: 'baja',  label: 'Fácil',  dot: '🟢' },
+  { value: 'media', label: 'Media',  dot: '🟡' },
+  { value: 'alta',  label: 'Difícil', dot: '🔴' },
+];
+
 const emptyOption = (label) => ({
   label,
   text: '',
@@ -46,7 +52,7 @@ const mapInitial = (initialData) => {
 
 const validate = (state) => {
   if (!state.statementText.trim() && !state.latex.trim()) return 'Debes ingresar texto o LaTeX en el enunciado.';
-  if (!state.area.trim()) return 'Area es requerida.';
+  if (!state.area.trim()) return 'Área es requerida.';
   if (!state.competencia.trim()) return 'Competencia es requerida.';
   if (state.options.length < 4 || state.options.length > 8) return 'Debes tener entre 4 y 8 opciones.';
   if (state.options.some((option) => !option.text.trim())) return 'Todas las opciones deben tener texto.';
@@ -77,34 +83,26 @@ function QuestionEditorForm({
   const canAddOption = useMemo(() => state.options.length < 8, [state.options.length]);
   const canRemoveOption = useMemo(() => state.options.length > 4, [state.options.length]);
 
-  const setField = (name, value) => {
-    setState((prev) => ({ ...prev, [name]: value }));
-  };
+  const setField = (name, value) => setState((prev) => ({ ...prev, [name]: value }));
 
   const handleDropStatement = (event) => {
     event.preventDefault();
-    const files = Array.from(event.dataTransfer.files || []).filter((file) => file.type.startsWith('image/'));
+    const files = Array.from(event.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
-
-    const previews = files.map((file) => URL.createObjectURL(file));
-
     setState((prev) => ({
       ...prev,
       statementImageFiles: [...prev.statementImageFiles, ...files],
-      statementImagePreviews: [...prev.statementImagePreviews, ...previews]
+      statementImagePreviews: [...prev.statementImagePreviews, ...files.map((f) => URL.createObjectURL(f))]
     }));
   };
 
   const handleStatementFileInput = (event) => {
-    const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
+    const files = Array.from(event.target.files || []).filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
-
-    const previews = files.map((file) => URL.createObjectURL(file));
-
     setState((prev) => ({
       ...prev,
       statementImageFiles: [...prev.statementImageFiles, ...files],
-      statementImagePreviews: [...prev.statementImagePreviews, ...previews]
+      statementImagePreviews: [...prev.statementImagePreviews, ...files.map((f) => URL.createObjectURL(f))]
     }));
   };
 
@@ -133,17 +131,14 @@ function QuestionEditorForm({
 
   const removeOption = () => {
     if (!canRemoveOption) return;
-
     setState((prev) => {
       const nextOptions = prev.options.slice(0, -1);
-      const nextCorrect = nextOptions.some((option) => option.label === prev.correctAnswer)
-        ? prev.correctAnswer
-        : nextOptions[0].label;
-
       return {
         ...prev,
         options: nextOptions,
-        correctAnswer: nextCorrect
+        correctAnswer: nextOptions.some((o) => o.label === prev.correctAnswer)
+          ? prev.correctAnswer
+          : nextOptions[0].label
       };
     });
   };
@@ -158,10 +153,7 @@ function QuestionEditorForm({
 
   const setOptionImageFile = (index, file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    updateOption(index, {
-      newImageFile: file,
-      newImagePreview: URL.createObjectURL(file)
-    });
+    updateOption(index, { newImageFile: file, newImagePreview: URL.createObjectURL(file) });
   };
 
   const dropOptionImage = (event, index) => {
@@ -173,49 +165,32 @@ function QuestionEditorForm({
   const submit = async (event) => {
     event.preventDefault();
     setClientError('');
-
     const validation = validate(state);
-    if (validation) {
-      setClientError(validation);
-      return;
-    }
+    if (validation) { setClientError(validation); return; }
 
     const payload = {
-      statement: {
-        text: state.statementText,
-        images: state.statementImagesExisting
-      },
+      statement: { text: state.statementText, images: state.statementImagesExisting },
       latex: state.latex,
-      options: state.options.map((option) => ({
-        label: option.label,
-        text: option.text,
-        image: option.newImageFile ? null : option.image || null
+      options: state.options.map((o) => ({
+        label: o.label,
+        text: o.text,
+        image: o.newImageFile ? null : o.image || null
       })),
       correctAnswer: state.correctAnswer,
       area: state.area,
       competencia: state.competencia,
       nivelCognitivo: state.nivelCognitivo,
       dificultadCualitativa: state.dificultadCualitativa,
-      triParams: {
-        a: Number(state.triA),
-        b: Number(state.triB),
-        c: Number(state.triC)
-      },
+      triParams: { a: Number(state.triA), b: Number(state.triB), c: Number(state.triC) },
       visibility: state.visibility,
       calibrationStatus: state.calibrationStatus
     };
 
     const formData = new FormData();
     formData.append('payload', JSON.stringify(payload));
-
-    state.statementImageFiles.forEach((file) => {
-      formData.append('statementImages', file);
-    });
-
-    state.options.forEach((option) => {
-      if (option.newImageFile) {
-        formData.append(`optionImage${option.label}`, option.newImageFile);
-      }
+    state.statementImageFiles.forEach((file) => formData.append('statementImages', file));
+    state.options.forEach((o) => {
+      if (o.newImageFile) formData.append(`optionImage${o.label}`, o.newImageFile);
     });
 
     await onSubmit(formData);
@@ -224,205 +199,291 @@ function QuestionEditorForm({
   return (
     <form onSubmit={submit} className="bg-white p-6 rounded-2xl shadow space-y-6">
       {(clientError || serverError) ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {clientError || serverError}
         </div>
       ) : null}
 
+      {/* ── Enunciado ── */}
       <div>
-        <label className="block text-sm font-medium mb-1">Enunciado (texto)</label>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Enunciado</label>
         <textarea
           value={state.statementText}
-          onChange={(event) => setField('statementText', event.target.value)}
+          onChange={(e) => setField('statementText', e.target.value)}
           rows="5"
-          className="w-full border rounded-lg px-3 py-2"
-          placeholder="Escribe el enunciado"
+          className="w-full border rounded-lg px-3 py-2 text-sm"
+          placeholder="Escribe el enunciado de la pregunta..."
         />
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">LaTeX (opcional)</label>
-        <input
-          value={state.latex}
-          onChange={(event) => setField('latex', event.target.value)}
-          className="w-full border rounded-lg px-3 py-2"
-          placeholder="Ejemplo: \\frac{a}{b}"
-        />
-        <div className="mt-2">
-          <LatexPreview latex={state.latex} />
-        </div>
-      </div>
-
+      {/* ── Imágenes del enunciado ── */}
       <div className="space-y-3">
-        <label className="block text-sm font-medium">Imagenes del enunciado</label>
+        <label className="block text-sm font-medium text-slate-700">Imágenes del enunciado</label>
         <div
-          onDragOver={(event) => event.preventDefault()}
+          onDragOver={(e) => e.preventDefault()}
           onDrop={handleDropStatement}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-sm text-gray-600"
+          className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-sm text-slate-500 hover:border-slate-400 transition-colors"
         >
-          Arrastra imagenes aqui o selecciona desde tu equipo.
+          Arrastra imágenes aquí o selecciona desde tu equipo.
           <input
             type="file"
             accept="image/*"
             multiple
             onChange={handleStatementFileInput}
-            className="block mt-3"
+            className="block mt-3 text-sm"
           />
         </div>
-
         {(state.statementImagesExisting.length > 0 || state.statementImagePreviews.length > 0) ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {state.statementImagesExisting.map((image, index) => (
               <div key={`existing-${image.url}-${index}`} className="border rounded-lg p-2">
                 <img src={image.url} alt="Enunciado" className="w-full h-24 object-cover rounded" />
-                <button type="button" onClick={() => removeExistingStatementImage(index)} className="text-xs text-red-600 mt-2">
-                  Quitar
-                </button>
+                <button type="button" onClick={() => removeExistingStatementImage(index)} className="text-xs text-red-600 mt-2">Quitar</button>
               </div>
             ))}
             {state.statementImagePreviews.map((preview, index) => (
               <div key={`new-${preview}-${index}`} className="border rounded-lg p-2">
                 <img src={preview} alt="Preview" className="w-full h-24 object-cover rounded" />
-                <button type="button" onClick={() => removeNewStatementImage(index)} className="text-xs text-red-600 mt-2">
-                  Quitar
-                </button>
+                <button type="button" onClick={() => removeNewStatementImage(index)} className="text-xs text-red-600 mt-2">Quitar</button>
               </div>
             ))}
           </div>
         ) : null}
       </div>
 
-      <div className="grid md:grid-cols-4 gap-4">
+      {/* ── Área + Competencia ── */}
+      <div className="grid md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Area</label>
-          <select value={state.area} onChange={(event) => setField('area', event.target.value)} className="w-full border rounded-lg px-3 py-2">
-            {AREA_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
+          <label className="block text-sm font-medium text-slate-700 mb-1">Área</label>
+          <select
+            value={state.area}
+            onChange={(e) => setField('area', e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+          >
+            {AREA_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Competencia</label>
-          <input value={state.competencia} onChange={(event) => setField('competencia', event.target.value)} className="w-full border rounded-lg px-3 py-2" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Nivel cognitivo</label>
-          <select value={state.nivelCognitivo} onChange={(event) => setField('nivelCognitivo', event.target.value)} className="w-full border rounded-lg px-3 py-2">
-            {NIVEL_OPTIONS.map((level) => (
-              <option key={level} value={level}>{level}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Dificultad cualitativa</label>
-          <select value={state.dificultadCualitativa} onChange={(event) => setField('dificultadCualitativa', event.target.value)} className="w-full border rounded-lg px-3 py-2">
-            <option value="baja">baja</option>
-            <option value="media">media</option>
-            <option value="alta">alta</option>
-          </select>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Competencia</label>
+          <input
+            value={state.competencia}
+            onChange={(e) => setField('competencia', e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Ej. Interpretación y comprensión"
+          />
         </div>
       </div>
 
-      <div className="grid md:grid-cols-5 gap-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">TRI a</label>
-          <input type="number" step="0.01" value={state.triA} onChange={(event) => setField('triA', event.target.value)} className="w-full border rounded-lg px-3 py-2" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">TRI b</label>
-          <input type="number" step="0.01" value={state.triB} onChange={(event) => setField('triB', event.target.value)} className="w-full border rounded-lg px-3 py-2" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">TRI c</label>
-          <input type="number" step="0.01" value={state.triC} onChange={(event) => setField('triC', event.target.value)} className="w-full border rounded-lg px-3 py-2" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Visibilidad</label>
-          <select value={state.visibility} onChange={(event) => setField('visibility', event.target.value)} className="w-full border rounded-lg px-3 py-2">
-            <option value="private">private</option>
-            <option value="institutional">institutional</option>
-            <option value="national">national</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Calibracion</label>
-          <select value={state.calibrationStatus} onChange={(event) => setField('calibrationStatus', event.target.value)} className="w-full border rounded-lg px-3 py-2">
-            <option value="experimental">experimental</option>
-            <option value="calibrated">calibrated</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-[#0A2E57]">Opciones</h3>
-          <div className="flex gap-2">
-            <button type="button" onClick={removeOption} disabled={!canRemoveOption} className="bg-gray-200 px-3 py-1 rounded disabled:opacity-50">
-              Quitar opcion
+      {/* ── Dificultad (pills) ── */}
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-2">Dificultad</label>
+        <div className="flex gap-2">
+          {DIFICULTAD_PILLS.map((pill) => (
+            <button
+              key={pill.value}
+              type="button"
+              onClick={() => setField('dificultadCualitativa', pill.value)}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                state.dificultadCualitativa === pill.value
+                  ? 'bg-[#0A2E57] text-white border-[#0A2E57]'
+                  : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+              }`}
+            >
+              {pill.dot} {pill.label}
             </button>
-            <button type="button" onClick={addOption} disabled={!canAddOption} className="bg-gray-200 px-3 py-1 rounded disabled:opacity-50">
-              Agregar opcion
+          ))}
+        </div>
+      </div>
+
+      {/* ── Opciones A–D (solo texto) ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-slate-700">Opciones de respuesta</h3>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={removeOption}
+              disabled={!canRemoveOption}
+              className="text-xs px-3 py-1 border rounded-lg disabled:opacity-40 hover:bg-slate-50"
+            >
+              − Quitar
+            </button>
+            <button
+              type="button"
+              onClick={addOption}
+              disabled={!canAddOption}
+              className="text-xs px-3 py-1 border rounded-lg disabled:opacity-40 hover:bg-slate-50"
+            >
+              ＋ Agregar
             </button>
           </div>
         </div>
 
         {state.options.map((option, index) => (
-          <div key={option.label} className="border rounded-xl p-4 space-y-2">
+          <div key={option.label} className="space-y-1">
             <div className="flex items-center gap-3">
-              <span className="text-lg font-bold w-6">{option.label}</span>
+              <span className="text-base font-bold text-slate-500 w-6 shrink-0">{option.label}</span>
               <input
                 value={option.text}
-                onChange={(event) => updateOption(index, { text: event.target.value })}
-                className="flex-1 border rounded-lg px-3 py-2"
-                placeholder={`Texto opcion ${option.label}`}
+                onChange={(e) => updateOption(index, { text: e.target.value })}
+                className="flex-1 border rounded-lg px-3 py-2 text-sm"
+                placeholder={`Texto de la opción ${option.label}`}
               />
             </div>
-
-            <div
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => dropOptionImage(event, index)}
-              className="border border-dashed rounded-lg p-3 text-sm text-gray-600"
-            >
-              Arrastra imagen para la opcion {option.label} o selecciona archivo.
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(event) => setOptionImageFile(index, event.target.files?.[0])}
-                className="block mt-2"
-              />
+            <div className="ml-9">
+              {(option.newImageFile || option.image?.url) ? (
+                <div className="inline-flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                  <img
+                    src={option.newImagePreview || option.image?.url}
+                    alt=""
+                    className="h-7 w-10 object-cover rounded"
+                  />
+                  <span className="max-w-36 truncate">{option.newImageFile?.name || 'imagen'}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateOption(index, { newImageFile: null, newImagePreview: '', image: null })}
+                    className="text-slate-400 hover:text-red-500 leading-none"
+                    aria-label="Quitar imagen"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <label className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 cursor-pointer">
+                  📎 Agregar imagen
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => setOptionImageFile(index, e.target.files?.[0])}
+                  />
+                </label>
+              )}
             </div>
-
-            {(option.newImagePreview || option.image?.url) ? (
-              <img
-                src={option.newImagePreview || option.image?.url}
-                alt={`opcion-${option.label}`}
-                className="h-20 w-32 object-cover rounded border"
-              />
-            ) : null}
           </div>
         ))}
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Respuesta correcta</label>
-          <select
-            value={state.correctAnswer}
-            onChange={(event) => setField('correctAnswer', event.target.value)}
-            className="w-full border rounded-lg px-3 py-2"
-          >
-            {state.options.map((option) => (
-              <option key={option.label} value={option.label}>{option.label}</option>
-            ))}
-          </select>
-        </div>
       </div>
 
-      <div className="flex gap-3">
-        <button type="submit" disabled={submitting} className="bg-[#0A2E57] text-white px-5 py-2 rounded-lg disabled:opacity-60">
-          {submitting ? 'Guardando...' : submitLabel}
+      {/* ── Respuesta correcta ── */}
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Respuesta correcta</label>
+        <select
+          value={state.correctAnswer}
+          onChange={(e) => setField('correctAnswer', e.target.value)}
+          className="border rounded-lg px-3 py-2 text-sm"
+        >
+          {state.options.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
+        </select>
+      </div>
+
+      {/* ── Configuración avanzada (colapsada por defecto) ── */}
+      <details className="border border-slate-200 rounded-xl overflow-hidden">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-slate-500 bg-slate-50 hover:bg-slate-100 select-none list-none flex items-center gap-2">
+          <span className="text-xs">▸</span>
+          Configuración avanzada — LaTeX, parámetros TRI, visibilidad
+        </summary>
+
+        <div className="p-4 space-y-5">
+          {/* LaTeX */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">LaTeX (opcional)</label>
+            <input
+              value={state.latex}
+              onChange={(e) => setField('latex', e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              placeholder="Ejemplo: \frac{a}{b}"
+            />
+            <div className="mt-2">
+              <LatexPreview latex={state.latex} />
+            </div>
+          </div>
+
+          {/* Nivel cognitivo */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Nivel cognitivo</label>
+            <select
+              value={state.nivelCognitivo}
+              onChange={(e) => setField('nivelCognitivo', e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+            >
+              {NIVEL_OPTIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+
+          {/* Parámetros TRI */}
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-2">
+              Parámetros TRI{' '}
+              <span className="text-xs font-normal text-slate-400">(se calibran automáticamente con uso real)</span>
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { key: 'triA', label: 'a — Discriminación', step: '0.01' },
+                { key: 'triB', label: 'b — Dificultad',     step: '0.01' },
+                { key: 'triC', label: 'c — Adivinanza',     step: '0.01' },
+              ].map(({ key, label, step }) => (
+                <div key={key}>
+                  <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                  <input
+                    type="number"
+                    step={step}
+                    value={state[key]}
+                    onChange={(e) => setField(key, e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Visibilidad + Calibración */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Visibilidad</label>
+              <select
+                value={state.visibility}
+                onChange={(e) => setField('visibility', e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="private">private</option>
+                <option value="institutional">institutional</option>
+                <option value="national">national</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Calibración</label>
+              <select
+                value={state.calibrationStatus}
+                onChange={(e) => setField('calibrationStatus', e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="experimental">experimental</option>
+                <option value="calibrated">calibrated</option>
+              </select>
+            </div>
+          </div>
+
+        </div>
+      </details>
+
+      {/* ── Acciones ── */}
+      <div className="flex gap-3 pt-2">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="bg-[#0A2E57] hover:bg-[#123e71] text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-60 transition-colors"
+        >
+          {submitting ? 'Guardando...' : (submitLabel || 'Guardar')}
         </button>
-        <button type="button" onClick={onCancel} className="bg-gray-200 text-gray-800 px-5 py-2 rounded-lg">
-          Cancelar
-        </button>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border border-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-sm hover:bg-slate-50"
+          >
+            Cancelar
+          </button>
+        ) : null}
       </div>
     </form>
   );

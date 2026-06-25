@@ -647,11 +647,16 @@ const createPreviewBatch = async ({ user, files, payload }) => {
 
   const questionsPath = path.join(baseDir, safeName(questionsFile?.originalname, 'questions.pdf'));
   await fs.writeFile(questionsPath, questionsFile.buffer);
+  console.log('[PDF IMPORT] Archivo recibido:', questionsPath);
+  console.log('[PDF IMPORT] Tamaño buffer recibido:', questionsFile.buffer.length, 'bytes');
+  const { statSync } = require('fs');
+  console.log('[PDF IMPORT] Tamaño en disco:', statSync(questionsPath).size, 'bytes');
 
   let answersPath = '';
   if (answersFile) {
     answersPath = path.join(baseDir, safeName(answersFile?.originalname, 'answers.pdf'));
     await fs.writeFile(answersPath, answersFile.buffer);
+    console.log('[PDF IMPORT] Respuestas en disco:', statSync(answersPath).size, 'bytes');
   }
 
   await prisma.pdfImportBatch.update({
@@ -659,9 +664,12 @@ const createPreviewBatch = async ({ user, files, payload }) => {
     data: { questionsPdfPath: questionsPath, answersPdfPath: answersPath }
   });
 
+  const useVision = payload.useVision === true || payload.useVision === 'true';
+
   try {
-    const { enqueueOcrJob } = require('../jobs/ocrQueue');
-    const jobId = enqueueOcrJob({
+    const { enqueueOcrJob, enqueueGeminiJob } = require('../jobs/ocrQueue');
+    const enqueueFn = useVision ? enqueueGeminiJob : enqueueOcrJob;
+    const jobId = enqueueFn({
       batchId: created.id,
       userId: user.id,
       schoolId,
@@ -670,13 +678,15 @@ const createPreviewBatch = async ({ user, files, payload }) => {
       config: payload || {}
     });
 
+    console.log(`[PDF IMPORT] Job encolado con engine=${useVision ? 'gemini-vision' : 'tesseract'} jobId=${jobId}`);
+
     await logAudit({
       schoolId,
       userId: user.id,
       action: `${getAuditPrefix(user)}.pdfImport.ocrQueued`,
       entityType: 'PdfImportBatch',
       entityId: created.id,
-      metadata: { jobId }
+      metadata: { jobId, engine: useVision ? 'gemini-vision' : 'tesseract' }
     });
 
     return {

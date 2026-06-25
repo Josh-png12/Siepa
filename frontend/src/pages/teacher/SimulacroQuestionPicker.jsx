@@ -50,13 +50,13 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
   const questionTextMap = useMemo(() => {
     const map = new Map();
     questions.forEach((question) => {
-      map.set(String(question._id), question.statement?.text || question.latex || '(sin texto)');
+      map.set(String(question.id), question.statementText || question.statement?.text || question.latex || '(sin texto)');
     });
     return map;
   }, [questions]);
 
   const toggleQuestion = (question) => {
-    const questionId = String(question._id);
+    const questionId = String(question.id);
     const isSelected = selectedIds.has(questionId);
 
     if (isSelected) {
@@ -101,7 +101,7 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
 
       if (saveInlineToBank) {
         const response = await createQuestion(formData);
-        const questionId = response.question?._id;
+        const questionId = response.question?.id;
 
         if (!questionId) {
           throw new Error('No se pudo crear la pregunta inline');
@@ -159,9 +159,9 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
           <button
             type="button"
             onClick={() => setShowInline((prev) => !prev)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium"
           >
-            {showInline ? 'Cerrar inline' : 'Nueva pregunta inline'}
+            {showInline ? '✕ Cerrar' : '＋ Crear pregunta nueva'}
           </button>
         </div>
 
@@ -190,10 +190,10 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
           </select>
         </div>
 
-        {loading ? (
-          <p className="text-sm text-gray-500">Cargando preguntas...</p>
-        ) : (
-          <div className="max-h-72 overflow-auto border rounded-lg">
+        <div className="h-72 overflow-auto border rounded-lg">
+          {loading ? (
+            <p className="text-sm text-gray-500 p-4">Cargando preguntas...</p>
+          ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
@@ -208,21 +208,21 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
                 {questions.map((question) => {
                   const checked = selectedIds.has(String(question._id));
                   return (
-                    <tr key={question._id} className="border-b align-top">
+                    <tr key={question.id} className="border-b align-top">
                       <td className="p-2">
                         <input type="checkbox" checked={checked} onChange={() => toggleQuestion(question)} />
                       </td>
-                      <td className="p-2 max-w-lg">{question.statement?.text || question.latex || '(sin texto)'}</td>
+                      <td className="p-2 max-w-lg">{question.statementText || question.statement?.text || question.latex || '(sin texto)'}</td>
                       <td className="p-2">{question.area}</td>
                       <td className="p-2">{question.competencia}</td>
-                      <td className="p-2">{Number(question.triParams?.b ?? 0).toFixed(2)}</td>
+                      <td className="p-2">{Number(question.triParamB ?? 0).toFixed(2)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {showInline ? (

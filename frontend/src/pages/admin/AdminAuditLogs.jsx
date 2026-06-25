@@ -97,9 +97,9 @@ function AdminAuditLogs() {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row._id} className="border-t">
+                <tr key={row.id} className="border-t">
                   <td className="p-2">{row.timestamp ? new Date(row.timestamp).toLocaleString('es-CO') : '-'}</td>
-                  <td className="p-2">{row.userId?.name || row.userId?.email || 'N/A'}</td>
+                  <td className="p-2">{row.user?.name || row.user?.email || 'N/A'}</td>
                   <td className="p-2">{row.action}</td>
                   <td className="p-2">{row.entityType}</td>
                   <td className="p-2">{row.entityId}</td>

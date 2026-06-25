@@ -10,6 +10,32 @@ const {
 } = require('../services/flexibleQuestionParser');
 const { ocrPdfPageWithRetry } = require('../services/pdfOcrService');
 
+const isImageError = (msg) => {
+  const s = String(msg || '').toLowerCase();
+  return s.includes('read image') || s.includes('failed to load image') || s.includes('image');
+};
+
+process.on('uncaughtException', (err) => {
+  if (isImageError(err.message)) {
+    // Tesseract internal Worker emitted an image-decode error via MessagePort.
+    // The pending ocrImage() call will resolve via its timeout with empty text.
+    console.warn('[WORKER] uncaughtException: imagen no soportada (JBIG2/JPEG2000), continuando...');
+    return;
+  }
+  console.error('[WORKER CRASH] uncaughtException:', err.message, err.stack);
+  if (parentPort) parentPort.postMessage({ type: 'error', error: err.message });
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  if (isImageError(reason?.message || String(reason))) {
+    console.warn('[WORKER] unhandledRejection: imagen no soportada, continuando...');
+    return;
+  }
+  console.error('[WORKER CRASH] unhandledRejection:', reason);
+  if (parentPort) parentPort.postMessage({ type: 'error', error: String(reason) });
+  process.exit(1);
+});
+
 let cancelRequested = false;
 if (parentPort) {
   parentPort.on('message', (message) => {
@@ -77,6 +103,16 @@ const run = async () => {
       config = {}
     } = workerData || {};
 
+    console.log('[WORKER] Job iniciado:', jobId);
+    console.log('[WORKER] pdfPath:', pdfPath);
+    try {
+      const { statSync } = require('fs');
+      const stat = statSync(pdfPath);
+      console.log('[WORKER] Tamaño en disco:', stat.size, 'bytes');
+    } catch (statErr) {
+      console.error('[WORKER] ERROR al leer archivo:', statErr.message);
+    }
+
     const densityThreshold = Number(config.ocrDensityThreshold || process.env.PDF_OCR_DENSITY_THRESHOLD || 200);
     const dpi = Number(config.ocrDpi || process.env.PDF_OCR_DPI || 200);
     const pageTimeoutMs = Number(config.pageTimeoutMs || process.env.PDF_OCR_PAGE_TIMEOUT_MS || 45000);
@@ -90,6 +126,9 @@ const run = async () => {
 
     const pages = await extractTextByPage(pdfPath);
     const totalPages = Number(pages.length || 0);
+
+    console.log('[WORKER] PDF cargado, iniciando procesamiento...');
+    console.log('[WORKER] Total páginas:', totalPages);
 
     if (!totalPages) {
       const emptyResult = await parsePreviewFromPages({
@@ -139,6 +178,8 @@ const run = async () => {
       const pageNumber = Number(page.page || idx + 1);
       const needsOcr = detectNeedsOcr({ text: page.text, density: page.density, threshold: densityThreshold });
 
+      console.log(`[WORKER] Procesando página ${pageNumber} / ${totalPages} | density=${page.density} needsOcr=${needsOcr}`);
+
       let finalText = normalizePageText(page.text);
       let source = 'text';
       let ocrError = '';
@@ -147,28 +188,43 @@ const run = async () => {
         usedOcr = true;
         pagesOcr += 1;
         const outPngPath = path.join(ocrImageDir, `page_${pageNumber}.png`);
-        // eslint-disable-next-line no-await-in-loop
-        const ocrResult = await ocrPdfPageWithRetry({
-          pdfPath,
-          pageNumber,
-          outPngPath,
-          lang,
-          dpi,
-          pageTimeoutMs,
-          maxRetries: 1
-        });
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const ocrResult = await ocrPdfPageWithRetry({
+            pdfPath,
+            pageNumber,
+            outPngPath,
+            lang,
+            dpi,
+            pageTimeoutMs,
+            maxRetries: 1
+          });
 
-        if (ocrResult.ok && String(ocrResult.text || '').trim()) {
-          finalText = normalizePageText(ocrResult.text);
-          source = 'ocr';
-        } else {
-          pagesFailedOcr += 1;
-          ocrError = String(ocrResult.error || (ocrResult.timedOut ? 'ocr_timeout' : 'ocr_empty'));
-          source = 'text';
+          if (ocrResult.ok && String(ocrResult.text || '').trim()) {
+            finalText = normalizePageText(ocrResult.text);
+            source = 'ocr';
+          } else {
+            pagesFailedOcr += 1;
+            ocrError = String(ocrResult.error || (ocrResult.timedOut ? 'ocr_timeout' : 'ocr_empty'));
+            source = 'text';
+          }
+        } catch (pageErr) {
+          const msg = String(pageErr.message || '').toLowerCase();
+          if (msg.includes('read image') || msg.includes('image')) {
+            console.warn(`[WORKER] Página ${pageNumber} - imagen JBIG2/JPEG2000 no soportada, usando texto nativo`);
+            pagesFailedOcr += 1;
+            ocrError = 'unsupported_image_format';
+            source = 'text';
+            // finalText retains whatever getTextContent() extracted (may be empty)
+          } else {
+            throw pageErr;
+          }
         }
       } else {
         pagesText += 1;
       }
+
+      console.log(`[WORKER] Página procesada: ${pageNumber} / ${totalPages} | source=${source}${ocrError ? ` error=${ocrError}` : ''}`);
 
       // eslint-disable-next-line no-await-in-loop
       const parsed = await parseQuestionsFromPage({
