@@ -353,6 +353,38 @@ export const reviewTeacherOCRSheet = (simulacroId, payload) =>
 export const publishTeacherOCRResults = (simulacroId, payload) =>
   api.post(`/teacher/ocr/${simulacroId}/publish`, payload).then((res) => res.data);
 
+// ==================== PHYSICAL SIMULACROS ====================
+export const listPhysicalSimulacros = () =>
+  api.get('/teacher/physical-simulacros').then((res) => res.data);
+
+export const getPhysicalSimulacro = (id) =>
+  api.get(`/teacher/physical-simulacros/${id}`).then((res) => res.data);
+
+export const createPhysicalSimulacro = (data) =>
+  api.post('/teacher/physical-simulacros', data).then((res) => res.data);
+
+export const updatePhysicalSimulacro = (id, data) =>
+  api.put(`/teacher/physical-simulacros/${id}`, data).then((res) => res.data);
+
+export const deletePhysicalSimulacro = (id) =>
+  api.delete(`/teacher/physical-simulacros/${id}`).then((res) => res.data);
+
+export const generatePhysicalSimulacroPdfs = (id) =>
+  api.post(`/teacher/physical-simulacros/${id}/generate-pdfs`).then((res) => res.data);
+
+export const getPhysicalReviewStats = (id) =>
+  api.get(`/teacher/physical-simulacros/${id}/review-stats`).then((res) => res.data);
+
+export const publishPhysicalResults = (id) =>
+  api.post(`/teacher/physical-simulacros/${id}/publish`).then((res) => res.data);
+
+export const processPhysicalScan = (id, formData) =>
+  api
+    .post(`/teacher/physical-simulacros/${id}/scan`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    .then((res) => res.data);
+
 // ==================== PDF IMPORT ====================
 export const teacherPreviewPdfImport = (formData, { onUploadProgress } = {}) =>
   api
