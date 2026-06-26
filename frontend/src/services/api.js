@@ -353,6 +353,38 @@ export const adminDownloadInstitutionReport = (params = {}) =>
     responseType: 'blob'
   }).then((res) => res.data);
 
+export const adminListQuestions = (params = {}) =>
+  api.get('/admin/questions', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminApproveQuestion = (id) =>
+  api.post(`/admin/questions/${id}/approve`).then((res) => res.data);
+
+export const adminRejectQuestion = (id) =>
+  api.post(`/admin/questions/${id}/reject`).then((res) => res.data);
+
+export const adminQuestionStatsByArea = () =>
+  api.get('/admin/questions/stats-by-area').then((res) => res.data);
+
+export const adminListGovernanceSimulacros = (params = {}) =>
+  api.get('/admin/governance-simulacros', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminForceArchiveSimulacro = (id) =>
+  api.post(`/admin/governance-simulacros/${id}/force-archive`).then((res) => res.data);
+
+export const adminListPhysicalTemplates = (params = {}) =>
+  api.get('/admin/physical-templates', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminCreatePhysicalTemplate = (formData) =>
+  api.post('/admin/physical-templates', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }).then((res) => res.data);
+
+export const adminPatchPhysicalTemplate = (id, payload) =>
+  api.patch(`/admin/physical-templates/${id}`, payload).then((res) => res.data);
+
+export const adminDeletePhysicalTemplate = (id) =>
+  api.delete(`/admin/physical-templates/${id}`).then((res) => res.data);
+
 // ==================== TEACHER OCR ====================
 export const getTeacherOCRSimulacros = (params = {}) =>
   api.get('/teacher/ocr', { params: cleanParams(params) }).then((res) => res.data);
