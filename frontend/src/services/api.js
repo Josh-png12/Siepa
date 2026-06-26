@@ -103,6 +103,9 @@ export const getBooklets = () => api.get('/booklets').then((res) => res.data);
 export const getBooklet = (id) => api.get(`/booklets/${id}`).then((res) => res.data);
 export const createBooklet = (data) => api.post('/booklets', data);
 
+export const getBookletPDF = (id) =>
+  api.get(`/booklets/${id}/pdf`, { responseType: 'blob' }).then((res) => res.data);
+
 // ==================== EVALUATIONS ====================
 export const startEvaluation = (bookletId) =>
   api.post(`/evaluations/start/${bookletId}`).then((res) => res.data);
@@ -329,6 +332,27 @@ export const getAdminSystemConfig = () =>
 export const updateAdminSystemConfig = (payload) =>
   api.put('/admin/system-config', payload).then((res) => res.data);
 
+export const adminGetGovernanceOCR = (params = {}) =>
+  api.get('/admin/governance-ocr', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminGetInstitutionAnalytics = (params = {}) =>
+  api.get('/admin/institution-analytics', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminGetAuditLogs = (params = {}) =>
+  api.get('/admin/audit-logs', { params: cleanParams(params) }).then((res) => res.data);
+
+export const adminGetConfig = () =>
+  api.get('/admin/config').then((res) => res.data);
+
+export const adminPatchConfig = (payload) =>
+  api.patch('/admin/config', payload).then((res) => res.data);
+
+export const adminDownloadInstitutionReport = (params = {}) =>
+  api.get('/admin/institution-report/download', {
+    params: cleanParams(params),
+    responseType: 'blob'
+  }).then((res) => res.data);
+
 // ==================== TEACHER OCR ====================
 export const getTeacherOCRSimulacros = (params = {}) =>
   api.get('/teacher/ocr', { params: cleanParams(params) }).then((res) => res.data);
@@ -352,6 +376,9 @@ export const reviewTeacherOCRSheet = (simulacroId, payload) =>
 
 export const publishTeacherOCRResults = (simulacroId, payload) =>
   api.post(`/teacher/ocr/${simulacroId}/publish`, payload).then((res) => res.data);
+
+export const getTeacherOCRSimulacroDetail = (id) =>
+  api.get(`/teacher/ocr/${id}`).then((res) => res.data);
 
 // ==================== PHYSICAL SIMULACROS ====================
 export const listPhysicalSimulacros = () =>
