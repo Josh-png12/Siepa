@@ -1,8 +1,8 @@
 // frontend/src/pages/docente/TeacherCourseDetail.jsx
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import api from '../../services/api';
 import { useAuthStore } from '../../store/useAuthStore';
-import axios from 'axios';
 
 function TeacherCourseDetail() {
   const { courseId } = useParams();
@@ -15,9 +15,7 @@ function TeacherCourseDetail() {
   useEffect(() => {
     const fetchCourseDetail = async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/api/teacher/courses/${courseId}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get(`/teacher/courses/${courseId}`);
         setCourse(res.data.course);
         setStudents(res.data.students);
       } catch (err) {

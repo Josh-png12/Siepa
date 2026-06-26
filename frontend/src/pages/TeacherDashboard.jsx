@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../services/api';
 import TeacherSidebar from '../../components/teacher/TeacherSidebar';  // Agrega sidebar persistente
 
 function TeacherDashboard() {
@@ -21,9 +21,7 @@ function TeacherDashboard() {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/teacher/dashboard', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get('/teacher/dashboard');
         setDashboard(res.data.data);
       } catch (err) {
         setError(err.response?.data?.message || err.message || 'Error al cargar el dashboard');

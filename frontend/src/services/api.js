@@ -1,9 +1,15 @@
 // frontend/src/services/api.js
+// SIEPA Frontend - API service with dynamic base URL
+
 import axios from 'axios';
 import { useAuthStore } from '../store/useAuthStore';
 
+// Use Vite env variable for API URL; fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: API_BASE_URL,
+  timeout: 30000, // 30 second timeout
 });
 
 const sanitizePaginationParam = (key, value) => {
@@ -27,6 +33,27 @@ const cleanParams = (params = {}) =>
     acc[key] = sanitizePaginationParam(key, value);
     return acc;
   }, {});
+
+// Network error handler helper
+const handleNetworkError = (error) => {
+  if (!error.response) {
+    // Network error (no response from server)
+    if (error.code === 'ECONNABORTED') {
+      error.userMessage = 'La solicitud tardó demasiado. Verifica tu conexión e intenta de nuevo.';
+    } else if (error.message === 'Network Error') {
+      error.userMessage = 'No se pudo conectar con el servidor. Verifica tu conexión a internet.';
+    } else {
+      error.userMessage = 'Error de conexión. Intenta de nuevo más tarde.';
+    }
+  } else if (error.response.status === 429) {
+    error.userMessage = 'Demasiadas peticiones. Espera un momento e intenta de nuevo.';
+  } else if (error.response.status === 413) {
+    error.userMessage = 'El archivo es demasiado grande. Reduce el tamaño e intenta de nuevo.';
+  } else if (error.response.status >= 500) {
+    error.userMessage = 'Error del servidor. Intenta de nuevo más tarde.';
+  }
+  return error;
+};
 
 api.interceptors.request.use(
   (config) => {
@@ -59,6 +86,10 @@ api.interceptors.response.use(
         window.location.replace('/login');
       }
     }
+
+    // Attach user-friendly error message
+    handleNetworkError(error);
+
     return Promise.reject(error);
   }
 );
@@ -280,106 +311,33 @@ export const adminAssignTeacher = (id, teacherId) =>
 export const adminAssignStudents = (id, studentIds) =>
   api.post(`/admin/courses/${id}/assign-students`, { studentIds }).then((res) => res.data);
 
-export const adminListQuestions = (params = {}) =>
-  api.get('/admin/questions', { params: cleanParams(params) }).then((res) => res.data);
+export const getAdminAnalytics = (params = {}) =>
+  api.get('/admin/analytics', { params: cleanParams(params) }).then((res) => res.data);
 
-export const adminQuestionStatsByArea = () =>
-  api.get('/admin/questions/stats/area').then((res) => res.data);
+export const getAdminDashboard = () =>
+  api.get('/admin/dashboard').then((res) => res.data);
 
-export const adminApproveQuestion = (id) =>
-  api.patch(`/admin/questions/${id}/approve`).then((res) => res.data);
+export const getAdminReports = (params = {}) =>
+  api.get('/admin/reports', { params: cleanParams(params) }).then((res) => res.data);
 
-export const adminRejectQuestion = (id) =>
-  api.patch(`/admin/questions/${id}/reject`).then((res) => res.data);
+export const downloadAdminReport = (reportId) =>
+  api.get(`/admin/reports/${reportId}/download`, { responseType: 'blob' }).then((res) => res.data);
 
-export const adminPatchQuestionTriParams = (id, payload) =>
-  api.patch(`/admin/questions/${id}/tri-params`, payload).then((res) => res.data);
+export const getAdminSystemConfig = () =>
+  api.get('/admin/system-config').then((res) => res.data);
 
-export const adminListPhysicalSimulacros = (params = {}) =>
-  api.get('/admin/physical-simulacros', { params: cleanParams(params) }).then((res) => res.data);
+export const updateAdminSystemConfig = (payload) =>
+  api.put('/admin/system-config', payload).then((res) => res.data);
 
-export const adminListGovernanceSimulacros = (params = {}) =>
-  api.get('/admin/simulacros', { params: cleanParams(params) }).then((res) => res.data);
+// ==================== TEACHER OCR ====================
+export const getTeacherOCRSimulacros = (params = {}) =>
+  api.get('/teacher/ocr', { params: cleanParams(params) }).then((res) => res.data);
 
-export const adminForceArchiveSimulacro = (id, type = 'virtual') =>
-  api.patch(`/admin/simulacros/${id}/force-archive`, { type }).then((res) => res.data);
+export const createTeacherOCRSimulacro = (payload) =>
+  api.post('/teacher/ocr', payload).then((res) => res.data);
 
-export const adminCreatePhysicalSimulacro = (payload) =>
-  api.post('/admin/physical-simulacros', payload).then((res) => res.data);
-
-export const adminForcePublishPhysical = (id) =>
-  api.patch(`/admin/physical-simulacros/${id}/force-publish`).then((res) => res.data);
-
-export const adminForceArchivePhysical = (id) =>
-  api.patch(`/admin/physical-simulacros/${id}/force-archive`).then((res) => res.data);
-
-export const adminReopenReviewPhysical = (id) =>
-  api.patch(`/admin/physical-simulacros/${id}/reopen-review`).then((res) => res.data);
-
-export const adminListPhysicalTemplates = () =>
-  api.get('/admin/physical-templates').then((res) => res.data);
-
-export const adminCreatePhysicalTemplate = (formData) =>
-  api.post('/admin/physical-templates', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  }).then((res) => res.data);
-
-export const adminPatchPhysicalTemplate = (id, payload) =>
-  api.patch(`/admin/physical-templates/${id}`, payload).then((res) => res.data);
-
-export const adminDeletePhysicalTemplate = (id) =>
-  api.delete(`/admin/physical-templates/${id}`).then((res) => res.data);
-
-export const adminGetConfig = () =>
-  api.get('/admin/config').then((res) => res.data);
-
-export const adminPatchConfig = (payload) =>
-  api.patch('/admin/config', payload).then((res) => res.data);
-
-export const adminGetAuditLogs = (params = {}) =>
-  api.get('/admin/audit', { params: cleanParams(params) }).then((res) => res.data);
-
-export const adminGetGovernanceOCR = (params = {}) =>
-  api.get('/admin/governance/ocr', { params: cleanParams(params) }).then((res) => res.data);
-
-export const adminGetInstitutionAnalytics = (params = {}) =>
-  api.get('/admin/analytics/institution', { params: cleanParams(params) }).then((res) => res.data);
-
-export const adminDownloadInstitutionReport = (params = {}) =>
-  api.get('/admin/reports/institution', { params: cleanParams(params), responseType: 'blob' }).then((res) => res.data);
-
-// ==================== PHYSICAL SIMULACROS ====================
-export const createPhysicalSimulacro = (data) =>
-  api.post('/teacher/physical-simulacros', data).then((res) => res.data);
-
-export const listPhysicalSimulacros = (params = {}) =>
-  api.get('/teacher/physical-simulacros', { params }).then((res) => res.data);
-
-export const getPhysicalSimulacro = (id) =>
-  api.get(`/teacher/physical-simulacros/${id}`).then((res) => res.data);
-
-export const generatePhysicalSimulacroPdfs = (id) =>
-  api.post(`/teacher/physical-simulacros/${id}/generate-pdfs`).then((res) => res.data);
-
-export const processPhysicalScan = (id, formData) =>
-  api
-    .post(`/teacher/physical-simulacros/${id}/process-scan`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-    .then((res) => res.data);
-
-export const getPhysicalReviewStats = (id) =>
-  api.get(`/teacher/physical-simulacros/${id}/review-stats`).then((res) => res.data);
-
-export const publishPhysicalResults = (id) =>
-  api.post(`/teacher/physical-simulacros/${id}/publish-results`).then((res) => res.data);
-
-// ==================== OCR UI (illustrative endpoints) ====================
-export const getTeacherOCRSimulacros = () =>
-  api.get('/teacher/ocr').then((res) => res.data);
-
-export const getTeacherOCRSimulacroDetail = (simulacroId) =>
-  api.get(`/teacher/ocr/${simulacroId}`).then((res) => res.data);
+export const getTeacherOCRSimulacro = (id) =>
+  api.get(`/teacher/ocr/${id}`).then((res) => res.data);
 
 export const uploadTeacherOCRScans = (simulacroId, formData, onUploadProgress) =>
   api
@@ -456,6 +414,9 @@ export const generateAIQuestions = ({ area, competencia, dificultad, tema, canti
 
 export const createAICaseGroup = ({ titulo, contenido }) =>
   api.post('/ai/create-case-group', { titulo, contenido }).then((res) => res.data);
+
+// Helper to get the base URL for constructing full URLs (e.g., for file downloads)
+export const getApiBaseUrl = () => API_BASE_URL.replace(/\/api\/?$/, '');
 
 // Compatibilidad legacy
 export const addQuestion = createQuestion;

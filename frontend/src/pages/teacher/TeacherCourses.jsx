@@ -1,8 +1,8 @@
 // frontend/src/pages/teacher/TeacherCourses.jsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import api from '../../services/api';
 import { useAuthStore } from '../../store/useAuthStore';
-import axios from 'axios';
 
 function TeacherCourses() {
   const { token } = useAuthStore();
@@ -15,9 +15,7 @@ function TeacherCourses() {
   useEffect(() => {
     const fetchCourses = async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/teacher/courses', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get('/teacher/courses');
         setCourses(res.data.courses || []);
       } catch (err) {
         console.error(err);

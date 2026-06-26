@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  createCourseMaterial,
+  createCourseMaterial, getApiBaseUrl,
   deleteCourseMaterial,
   getCourseMaterials,
   updateCourseMaterial
@@ -98,11 +98,13 @@ function CourseMaterials() {
   };
 
   const onOpen = async (material) => {
-    window.open(`http://localhost:5000${material.filePath}`, '_blank');
+    const baseUrl = getApiBaseUrl();
+    window.open(`${baseUrl}${material.filePath}`, '_blank');
   };
 
   const onDownload = async (material) => {
-    window.open(`http://localhost:5000${material.filePath}`, '_blank');
+    const baseUrl = getApiBaseUrl();
+    window.open(`${baseUrl}${material.filePath}`, '_blank');
   };
 
   return (
