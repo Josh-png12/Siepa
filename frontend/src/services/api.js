@@ -57,15 +57,38 @@ const handleNetworkError = (error) => {
 
 api.interceptors.request.use(
   (config) => {
-    const token = useAuthStore.getState().token;
-    const normalizedUrl = String(config.url || '');
+    let token = useAuthStore.getState().token;
 
-    if (normalizedUrl.startsWith('/admin') && !token) {
-      return Promise.reject(new Error('NO_AUTH_TOKEN'));
+    // Fallback: if the store hasn't hydrated yet, read directly from storage
+    if (!token) {
+      try {
+        const STORAGE_KEY = 'siepa-auth-storage';
+        const raw =
+          window.localStorage.getItem(STORAGE_KEY) ||
+          window.sessionStorage.getItem(STORAGE_KEY);
+        if (raw) token = JSON.parse(raw)?.token || null;
+      } catch (_) {}
     }
 
+    const normalizedUrl = String(config.url || '');
+
+    // ── Debug: trace token state on every request ──
+    if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+      console.log(
+        `[API] ${config.method?.toUpperCase()} ${normalizedUrl}`,
+        token ? `🔐 token=${token.slice(0, 12)}…` : '⚠️ NO TOKEN'
+      );
+    }
+
+    // Attach token when available — let the backend decide auth (401 → logout redirect)
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else if (normalizedUrl.startsWith('/admin')) {
+      // Warn in console; the request will still reach the backend and return 401,
+      // which the response interceptor catches for logout + redirect.
+      if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+        console.warn(`[API] Admin route ${normalizedUrl} requested without token — backend will reject with 401`);
+      }
     }
 
     return config;

@@ -11,6 +11,13 @@ const readAuthFromStorage = () => {
       if (!raw) continue;
       const parsed = JSON.parse(raw);
       if (parsed?.user && parsed?.token) {
+        if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+          console.log(
+            `[AuthStore] 🔓 Token recovered from ${storage === window.localStorage ? 'localStorage' : 'sessionStorage'}`,
+            `token=${parsed.token.slice(0, 12)}…`,
+            `user=${parsed.user.email}`
+          );
+        }
         return {
           user: parsed.user,
           token: parsed.token,
@@ -22,6 +29,9 @@ const readAuthFromStorage = () => {
     }
   }
 
+  if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+    console.log('[AuthStore] 🔒 No token found in storage (fresh session)');
+  }
   return { user: null, token: null, remember: false };
 };
 
@@ -30,12 +40,27 @@ const writeAuthToStorage = ({ user, token, remember }) => {
   window.localStorage.removeItem(STORAGE_KEY);
   window.sessionStorage.removeItem(STORAGE_KEY);
 
-  if (!user || !token) return;
+  if (!user || !token) {
+    if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+      console.log('[AuthStore] 🗑️ Auth cleared from storage (logout)');
+    }
+    return;
+  }
 
+  const target = remember ? 'localStorage' : 'sessionStorage';
   if (remember) {
     window.localStorage.setItem(STORAGE_KEY, payload);
   } else {
     window.sessionStorage.setItem(STORAGE_KEY, payload);
+  }
+
+  if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+    console.log(
+      `[AuthStore] 💾 Token saved to ${target}`,
+      `token=${token.slice(0, 12)}…`,
+      `user=${user.email}`,
+      `remember=${remember}`
+    );
   }
 };
 
@@ -50,8 +75,29 @@ const useAuthStore = create((set, get) => ({
 
   login: (userData, authToken, options = {}) => {
     const remember = Boolean(options.remember);
+
+    if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+      console.log(
+        '[AuthStore] 🚀 login() called',
+        `user=${userData?.email}`,
+        `role=${userData?.role}`,
+        `token=${authToken?.slice(0, 12)}…`,
+        `remember=${remember}`
+      );
+    }
+
     writeAuthToStorage({ user: userData, token: authToken, remember });
     set({ user: userData, token: authToken, remember });
+
+    // Verify the token is now in the store
+    if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
+      const stored = useAuthStore.getState().token;
+      console.log(
+        '[AuthStore] ✅ Store state after login:',
+        `token=${stored?.slice(0, 12)}…`,
+        `user=${useAuthStore.getState().user?.email}`
+      );
+    }
   },
 
   logout: () => {
