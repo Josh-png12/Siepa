@@ -2,232 +2,169 @@ const fs = require('fs/promises');
 const path = require('path');
 require('../utils/canvasShim');
 const { renderPageToImage } = require('./pdfOcrService');
+const { extractQuestionsFromImage } = require('./replicateService');
+const { extractImagesFromPdfPage } = require('./pdfImageExtractor');
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-const MAX_RETRIES = 3;
-const INTER_PAGE_DELAY_MS = 2000;
-
-const EXTRACTION_PROMPT = `Eres un experto en extracción de preguntas de exámenes ICFES Colombia. Extrae TODAS las preguntas de esta imagen en JSON puro sin backticks:
-{
-  "preguntas": [
-    {
-      "numero": 1,
-      "enunciado": "texto completo",
-      "tiene_imagen": true,
-      "descripcion_imagen": "descripción detallada de gráfica/tabla/diagrama si existe",
-      "texto_base": "fragmento de texto compartido si las preguntas dependen de él, null si no",
-      "opciones": { "A": "...", "B": "...", "C": "...", "D": "..." }
-    }
-  ]
-}
-Si la página no tiene preguntas (es portada, índice, etc), retorna: {"preguntas": []}`;
-
+const INTER_PAGE_DELAY_MS = 10000; // 10s para respetar rate limit de 6 req/min en Replicate
 const loadPdfJs = () => require('pdfjs-dist/legacy/build/pdf.js');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function parseGeminiJson(raw) {
-  let text = raw.trim()
-    .replace(/```(?:json)?/gi, '')
-    .replace(/```/g, '')
-    .trim();
+// ─── Vision call (Replicate DeepSeek-VL) ─────────────────────────────────────
 
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && Array.isArray(parsed.preguntas)) return parsed.preguntas;
-  } catch (_) {}
-
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end > start) {
+async function callVisionModel(base64Image, pageNum = 0) {
     try {
-      const parsed = JSON.parse(text.slice(start, end + 1));
-      if (Array.isArray(parsed.preguntas)) return parsed.preguntas;
-    } catch (_) {}
-  }
-
-  return [];
+        const questions = await extractQuestionsFromImage(base64Image);
+        console.log(`[PDF EXTRACTOR] Página ${pageNum}: ${questions.length} preguntas extraídas vía DeepSeek-VL`);
+        return questions;
+    } catch (err) {
+        console.error(`[PDF EXTRACTOR ERROR] Página ${pageNum}:`, err.message);
+        throw err;
+    }
 }
 
-// Extracts retryDelay in ms from a 429 response body.
-// Gemini sends: { "error": { "details": [{ "retryDelay": "42s" }] } }
-function parseRetryDelayMs(rawBody) {
-  try {
-    const parsed = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
-    const details = parsed?.error?.details || [];
-    for (const detail of details) {
-      const raw = detail?.retryDelay;
-      if (raw) {
-        const match = String(raw).match(/^(\d+(?:\.\d+)?)\s*s$/i);
-        if (match) return Math.round(Number(match[1]) * 1000);
-      }
-    }
-  } catch (_) {}
-  return null;
-}
+// ─── Mapping: DeepSeek-VL format → preview format ────────────────────────────
 
-async function callGeminiVision(base64Image, pageNum = 0) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY no configurada');
+function mapToPreviewFormat(questions, imageUrls = []) {
+    // Si hay imágenes extraídas, las asociamos a las preguntas de la página
+    // (Asumimos que las preguntas de una página comparten las imágenes)
+    return questions.map((q, idx) => {
+        const opts = q.opciones || {};
+        const options = ['A', 'B', 'C', 'D']
+            .filter((k) => opts[k])
+            .map((k) => ({ label: k, text: String(opts[k]).trim() }));
 
-  const requestBody = JSON.stringify({
-    contents: [{
-      parts: [
-        { text: EXTRACTION_PROMPT },
-        { inline_data: { mime_type: 'image/png', data: base64Image } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 4096
-    }
-  });
+        let statement = String(q.pregunta || q.enunciado || '').trim();
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    // eslint-disable-next-line no-await-in-loop
-    const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody
+        // Incluir descripción de imagen si existe (DeepSeek-VL)
+        const imageDesc = q.imagen_descripcion || q.descripcion_imagen || null;
+        if (imageDesc) {
+            statement = `${statement}\n[Descripción de imagen: ${String(imageDesc).trim()}]`;
+        }
+
+        if (q.texto_base) {
+            statement = `${String(q.texto_base).trim()}\n\n${statement}`;
+        }
+
+        const detectedAnswer = q.respuesta_correcta
+            ? String(q.respuesta_correcta).trim().toUpperCase()
+            : null;
+
+        return {
+            qNumber: Number(q.numero) || idx + 1,
+            statement,
+            options,
+            detectedAnswer,
+            area: 'General',
+            competencia: 'General',
+            nivelCognitivo: 'comprender',
+            dificultadCualitativa: 'media',
+            _source: 'deepseek-vl',
+            imageDescription: imageDesc,
+            // 🔥 NUEVO: URLs de las imágenes reales extraídas del PDF
+            imageUrls: imageUrls // array de strings con las rutas
+        };
     });
-
-    if (response.status === 429) {
-      // eslint-disable-next-line no-await-in-loop
-      const rawBody = await response.text().catch(() => '{}');
-      const retryDelayMs = parseRetryDelayMs(rawBody);
-      const waitMs = (retryDelayMs !== null ? retryDelayMs : 60000) + 2000;
-      const waitSec = Math.round(waitMs / 1000);
-
-      if (attempt < MAX_RETRIES) {
-        console.log(`[PDF EXTRACTOR] Página ${pageNum}: rate limit, esperando ${waitSec}s antes de reintentar (intento ${attempt}/${MAX_RETRIES})...`);
-        // eslint-disable-next-line no-await-in-loop
-        await sleep(waitMs);
-        continue;
-      }
-
-      throw new Error(`Gemini 429: rate limit después de ${MAX_RETRIES} intentos (última espera sugerida: ${waitSec}s)`);
-    }
-
-    if (!response.ok) {
-      // eslint-disable-next-line no-await-in-loop
-      const errBody = await response.text().catch(() => '');
-      throw new Error(`Gemini ${response.status}: ${errBody}`);
-    }
-
-    // eslint-disable-next-line no-await-in-loop
-    const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) throw new Error('Respuesta vacía de Gemini');
-
-    return parseGeminiJson(text);
-  }
-
-  throw new Error('Gemini: máximo de reintentos alcanzado');
 }
 
-// Maps a Gemini question to the previewQuestions format expected by pdfImportService
-function mapToPreviewFormat(geminiQuestions) {
-  return geminiQuestions.map((q, idx) => {
-    const opts = q.opciones || {};
-    const options = ['A', 'B', 'C', 'D']
-      .filter((k) => opts[k])
-      .map((k) => ({ label: k, text: String(opts[k]).trim() }));
-
-    let statement = String(q.enunciado || '').trim();
-    if (q.texto_base) {
-      statement = `${String(q.texto_base).trim()}\n\n${statement}`;
-    }
-    if (q.tiene_imagen && q.descripcion_imagen) {
-      statement = `${statement}\n[Imagen: ${String(q.descripcion_imagen).trim()}]`;
-    }
-
-    return {
-      qNumber: Number(q.numero) || idx + 1,
-      statement,
-      options,
-      detectedAnswer: null,
-      area: 'General',
-      competencia: 'General',
-      nivelCognitivo: 'comprender',
-      dificultadCualitativa: 'media',
-      _source: 'gemini-vision'
-    };
-  });
-}
+// ─── Main extraction pipeline ────────────────────────────────────────────────
 
 async function extractQuestionsFromPdf({ filePath, maxPages = 50, onProgress }) {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY no configurada');
+    try {
+        const apiKey = process.env.REPLICATE_API_TOKEN;
+        if (!apiKey) throw new Error('REPLICATE_API_TOKEN no configurada. Agrega tu token en el archivo .env');
 
-    console.log('[PDF EXTRACTOR] Cargando pdfjs...');
-    const pdfjsLib = await loadPdfJs();
+        console.log('[PDF EXTRACTOR] Cargando pdfjs...');
+        const pdfjsLib = loadPdfJs();
 
-    console.log(`[PDF EXTRACTOR] Leyendo archivo: ${filePath}`);
-    const buffer = await fs.readFile(filePath);
+        console.log(`[PDF EXTRACTOR] Leyendo archivo: ${filePath}`);
+        const buffer = await fs.readFile(filePath);
 
-    console.log('[PDF EXTRACTOR] Parseando documento PDF...');
-    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        console.log('[PDF EXTRACTOR] Parseando documento PDF...');
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
 
-    const totalAll = Number(doc.numPages || 0);
-    const totalPages = Math.min(totalAll, Number(maxPages) || 50);
-    console.log(`[PDF EXTRACTOR] Total páginas: ${totalAll}, procesando: ${totalPages}`);
+        const totalAll = Number(doc.numPages || 0);
+        const totalPages = Math.min(totalAll, Number(maxPages) || 50);
+        console.log(`[PDF EXTRACTOR] Total páginas: ${totalAll}, procesando: ${totalPages}`);
 
-    const tmpDir = path.join(process.cwd(), 'uploads', 'tmp', 'gemini-extract');
-    await fs.mkdir(tmpDir, { recursive: true });
+        const tmpDir = path.join(process.cwd(), 'uploads', 'tmp', 'deepseek-extract');
+        await fs.mkdir(tmpDir, { recursive: true });
 
-    const allQuestions = [];
-    let paginasConPreguntas = 0;
+        const imagesBaseDir = path.join(process.cwd(), 'uploads', 'extracted');
+        await fs.mkdir(imagesBaseDir, { recursive: true });
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      // 2-second gap between pages to stay under the 15 req/min free-tier limit
-      if (pageNum > 1) {
-        // eslint-disable-next-line no-await-in-loop
-        await sleep(INTER_PAGE_DELAY_MS);
-      }
+        const allQuestions = [];
+        let paginasConPreguntas = 0;
 
-      const outPngPath = path.join(tmpDir, `page_${Date.now()}_${pageNum}.png`);
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            if (pageNum > 1) {
+                console.log(`[PDF EXTRACTOR] Esperando ${INTER_PAGE_DELAY_MS / 1000}s antes de la siguiente página (rate limit)...`);
+                await sleep(INTER_PAGE_DELAY_MS);
+            }
 
-      try {
-        console.log(`[PDF EXTRACTOR] Renderizando página ${pageNum}/${totalPages}...`);
-        // eslint-disable-next-line no-await-in-loop
-        await renderPageToImage({ pdfPath: filePath, pageNumber: pageNum, outPngPath, dpi: 200 });
-        // eslint-disable-next-line no-await-in-loop
-        const imageBuffer = await fs.readFile(outPngPath);
-        const base64 = imageBuffer.toString('base64');
+            const outPngPath = path.join(tmpDir, `page_${Date.now()}_${pageNum}.png`);
+            let extractedImageUrls = [];
 
-        console.log(`[PDF EXTRACTOR] Enviando página ${pageNum} a Gemini...`);
-        // eslint-disable-next-line no-await-in-loop
-        const pageQuestions = await callGeminiVision(base64, pageNum);
-        console.log(`[PDF EXTRACTOR] Página ${pageNum}: ${pageQuestions.length} preguntas encontradas`);
+            try {
+                console.log(`[PDF EXTRACTOR] Renderizando página ${pageNum}/${totalPages}...`);
 
-        if (pageQuestions.length > 0) {
-          paginasConPreguntas++;
-          allQuestions.push(...pageQuestions);
+                // 1. Renderizar página para enviar a DeepSeek-VL
+                await renderPageToImage({
+                    pdfPath: filePath,
+                    pageNumber: pageNum,
+                    outPngPath,
+                    dpi: 150
+                });
+
+                const imageBuffer = await fs.readFile(outPngPath);
+                const base64 = imageBuffer.toString('base64');
+
+                console.log(`[PDF EXTRACTOR] Enviando página ${pageNum} a DeepSeek-VL (${Math.round(base64.length / 1024)} KB)...`);
+                const pageQuestions = await callVisionModel(base64, pageNum);
+
+                // 2. Extraer imágenes reales de la página (diagramas, gráficos, etc.)
+                console.log(`[PDF EXTRACTOR] Extrayendo imágenes incrustadas de página ${pageNum}...`);
+                const imageUrls = await extractImagesFromPdfPage(
+                    filePath,
+                    pageNum,
+                    imagesBaseDir,
+                    `page_${pageNum}`
+                );
+                extractedImageUrls = imageUrls;
+
+                if (pageQuestions.length === 0) {
+                    console.log(`[PDF EXTRACTOR] Página ${pageNum}: 0 preguntas encontradas (posiblemente portada o sin preguntas)`);
+                } else {
+                    console.log(`[PDF EXTRACTOR] Página ${pageNum}: ${pageQuestions.length} preguntas encontradas, ${imageUrls.length} imágenes extraídas`);
+                    paginasConPreguntas++;
+                    
+                    // Asociar las imágenes a las preguntas de esta página
+                    const mappedQuestions = mapToPreviewFormat(pageQuestions, imageUrls);
+                    allQuestions.push(...mappedQuestions);
+                }
+
+            } catch (err) {
+                console.error(`[PDF EXTRACTOR ERROR] Página ${pageNum}:`, err.message);
+            } finally {
+                await fs.unlink(outPngPath).catch(() => {});
+            }
+
+            if (typeof onProgress === 'function') {
+                onProgress({
+                    currentPage: pageNum,
+                    totalPages,
+                    percent: Math.round((pageNum / Math.max(1, totalPages)) * 100)
+                });
+            }
         }
-      } catch (err) {
-        console.error(`[PDF EXTRACTOR ERROR] Página ${pageNum}:`, err.message);
-      } finally {
-        await fs.unlink(outPngPath).catch(() => {});
-      }
 
-      if (typeof onProgress === 'function') {
-        onProgress({
-          currentPage: pageNum,
-          totalPages,
-          percent: Math.round((pageNum / Math.max(1, totalPages)) * 100)
-        });
-      }
+        console.log(`[PDF EXTRACTOR] Completado: ${allQuestions.length} preguntas en ${paginasConPreguntas} páginas`);
+        return { preguntas: allQuestions, paginasProcesadas: totalPages, paginasConPreguntas };
+    } catch (err) {
+        console.error('[PDF EXTRACTOR ERROR]', err.message);
+        console.error(err.stack);
+        throw err;
     }
-
-    console.log(`[PDF EXTRACTOR] Completado: ${allQuestions.length} preguntas en ${paginasConPreguntas} páginas`);
-    return { preguntas: allQuestions, paginasProcesadas: totalPages, paginasConPreguntas };
-  } catch (err) {
-    console.error('[PDF EXTRACTOR ERROR]', err.message);
-    console.error(err.stack);
-    throw err;
-  }
 }
 
 module.exports = { extractQuestionsFromPdf, mapToPreviewFormat };

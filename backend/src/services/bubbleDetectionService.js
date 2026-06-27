@@ -1,6 +1,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 require('../utils/canvasShim');
+const { validateBubblesFromImage } = require('./replicateService');
 let _canvasLib;
 const getCanvasLib = () => {
   if (_canvasLib) return _canvasLib;
@@ -200,6 +201,59 @@ const readQrFromImageData = (imageData) => {
   return String(code.data);
 };
 
+// ─── Confidence & DeepSeek-VL fallback ────────────────────────────────────────
+
+const DEEPSEEK_FALLBACK_CONFIDENCE_THRESHOLD = 80; // porcentaje mínimo de confianza antes de usar fallback
+const DEEPSEEK_FALLBACK_MAX_X_RATIO = 0.2; // máximo de respuestas 'X' (no detectadas) antes de usar fallback
+
+/**
+ * Computa un puntaje de confianza (0-100) a partir del bubbleMatrix.
+ * Se basa en el porcentaje de preguntas que tienen una burbuja claramente marcada
+ * (densidad de la mejor opción > MARK_DENSITY_THRESHOLD).
+ */
+const computeConfidenceScore = (bubbleMatrix, markThreshold = 0.5) => {
+  if (!Array.isArray(bubbleMatrix) || bubbleMatrix.length === 0) return 0;
+
+  let clearMarks = 0;
+  let total = 0;
+
+  for (const row of bubbleMatrix) {
+    if (!Array.isArray(row.optionsDensity) || row.optionsDensity.length === 0) continue;
+    total++;
+    const maxDensity = Math.max(...row.optionsDensity);
+    if (maxDensity > markThreshold) {
+      clearMarks++;
+    }
+  }
+
+  return total > 0 ? Math.round((clearMarks / total) * 100) : 0;
+};
+
+/**
+ * Convierte las respuestas de DeepSeek-VL (array de letras) al formato bubbleMatrix.
+ *
+ * @param {string[]} answers - Array de letras (A-E o 'X') por pregunta
+ * @param {number} numOptions - Opciones por pregunta (default: 5)
+ * @returns {Array} - bubbleMatrix [{ questionNumber, optionsDensity: [densA, densB, ...] }]
+ */
+const answersToBubbleMatrix = (answers, numOptions = 5) => {
+  const optionIndex = { A: 0, B: 1, C: 2, D: 3, E: 4 };
+
+  return answers.map((answer, idx) => {
+    const densities = new Array(numOptions).fill(0);
+    const optIdx = optionIndex[answer];
+    if (optIdx !== undefined) {
+      densities[optIdx] = 0.9; // alta densidad para la opción detectada
+    }
+    // Si es 'X' o inválido, todas las densidades quedan en 0 (no marcada)
+
+    return {
+      questionNumber: idx + 1,
+      optionsDensity: densities
+    };
+  });
+};
+
 // ─── Core detection ───────────────────────────────────────────────────────────
 
 /**
@@ -214,19 +268,25 @@ const readQrFromImageData = (imageData) => {
  * @param {number} opts.numOptions     - Options per question (default from omrCoordinates.json)
  */
 const detectBubblesInImage = async (imageBuffer, { dpi = 200, totalQuestions = null, numOptions = null } = {}) => {
-  // ── Try Python microservice first ────────────────────────────────────────────
+  const nOpts = numOptions || omrCoords.numOptions || 5;
+  const nQ = totalQuestions || (omrCoords.columns * omrCoords.questionsPerColumn);
+
+  let bubbleMatrix = null;
+  let qrToken = null;
+  let detectionMethod = 'none';
+
+  // ── Step 1: Try Python microservice first ───────────────────────────────────
   try {
     const result = await callPythonOcrService(imageBuffer, { dpi });
-    // Respect totalQuestions / numOptions overrides if provided
-    const nQ = totalQuestions || (omrCoords.columns * omrCoords.questionsPerColumn);
-    const nOpts = numOptions || omrCoords.numOptions || 5;
-    const matrix = result.bubbleMatrix
+    bubbleMatrix = result.bubbleMatrix
       .filter((r) => r.questionNumber <= nQ)
       .map((r) => ({
         questionNumber: r.questionNumber,
         optionsDensity: r.optionsDensity.slice(0, nOpts)
       }));
-    return { bubbleMatrix: matrix, qrToken: result.qrToken };
+    qrToken = result.qrToken;
+    detectionMethod = 'python-opencv';
+    console.log(`[OMR] Python OpenCV detection: ${bubbleMatrix.length} preguntas procesadas`);
   } catch (err) {
     const isUnavailable =
       err.name === 'AbortError' ||
@@ -239,76 +299,115 @@ const detectBubblesInImage = async (imageBuffer, { dpi = 200, totalQuestions = n
     }
   }
 
-  // ── Canvas fallback (original implementation) ────────────────────────────────
-  console.log('[OMR] Using canvas bubble detection');
-  const nOpts = numOptions || omrCoords.numOptions || 5;
-  const nQ = totalQuestions || (omrCoords.columns * omrCoords.questionsPerColumn);
+  // ── Step 2: Canvas fallback if Python didn't work ───────────────────────────
+  if (!bubbleMatrix) {
+    console.log('[OMR] Using canvas bubble detection');
+    const img = await loadImage(imageBuffer);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, img.width, img.height);
 
-  const img = await loadImage(imageBuffer);
-  const canvas = createCanvas(img.width, img.height);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-  const imageData = ctx.getImageData(0, 0, img.width, img.height);
+    const radiusPx = mmToPx(omrCoords.bubble.diameter / 2, dpi);
 
-  const radiusPx = mmToPx(omrCoords.bubble.diameter / 2, dpi);
+    // QR detection
+    try {
+      qrToken = readQrFromImageData(imageData);
 
-  // ── QR detection in the QR zone ─────────────────────────────────────────────
-  let qrToken = null;
-  try {
-    // jsQR works best on the full image; try full then crop to QR region
-    qrToken = readQrFromImageData(imageData);
+      if (!qrToken) {
+        const qx = Math.floor(mmToPx(omrCoords.qr.x, dpi));
+        const qy = Math.floor(mmToPx(omrCoords.qr.y, dpi));
+        const qsize = Math.ceil(mmToPx(omrCoords.qr.size, dpi));
+        const pad = Math.ceil(mmToPx(5, dpi));
+        const cropX = Math.max(0, qx - pad);
+        const cropY = Math.max(0, qy - pad);
+        const cropW = Math.min(img.width - cropX, qsize + pad * 2);
+        const cropH = Math.min(img.height - cropY, qsize + pad * 2);
 
-    if (!qrToken) {
-      // Crop to the QR region defined in omrCoordinates.json and retry
-      const qx = Math.floor(mmToPx(omrCoords.qr.x, dpi));
-      const qy = Math.floor(mmToPx(omrCoords.qr.y, dpi));
-      const qsize = Math.ceil(mmToPx(omrCoords.qr.size, dpi));
-      const pad = Math.ceil(mmToPx(5, dpi)); // 5mm padding around QR
-      const cropX = Math.max(0, qx - pad);
-      const cropY = Math.max(0, qy - pad);
-      const cropW = Math.min(img.width - cropX, qsize + pad * 2);
-      const cropH = Math.min(img.height - cropY, qsize + pad * 2);
-
-      if (cropW > 0 && cropH > 0) {
-        const cropData = ctx.getImageData(cropX, cropY, cropW, cropH);
-        qrToken = readQrFromImageData(cropData);
+        if (cropW > 0 && cropH > 0) {
+          const cropData = ctx.getImageData(cropX, cropY, cropW, cropH);
+          qrToken = readQrFromImageData(cropData);
+        }
       }
+    } catch (_qrError) {
+      qrToken = null;
     }
-  } catch (_qrError) {
-    qrToken = null;
-  }
 
-  // ── Bubble scanning ──────────────────────────────────────────────────────────
-  const bubbleMatrix = [];
-  let geminiResolved = 0;
-  let canvasResolved = 0;
+    // Bubble scanning
+    bubbleMatrix = [];
+    let geminiResolved = 0;
+    let canvasResolved = 0;
 
-  for (let q = 1; q <= nQ; q++) {
-    const optionsDensity = [];
-    for (let i = 0; i < nOpts; i++) {
-      const { x, y } = computeBubbleCenter(q, i, dpi);
-      let density = sampleCircleDensity(imageData, x, y, radiusPx);
+    for (let q = 1; q <= nQ; q++) {
+      const optionsDensity = [];
+      for (let i = 0; i < nOpts; i++) {
+        const { x, y } = computeBubbleCenter(q, i, dpi);
+        let density = sampleCircleDensity(imageData, x, y, radiusPx);
 
-      if (density >= GEMINI_DOUBT_MIN && density <= GEMINI_DOUBT_MAX) {
-        const geminiDensity = await callGeminiForBubble(canvas, x, y, radiusPx);
-        if (geminiDensity !== null) {
-          density = geminiDensity;
-          geminiResolved++;
+        if (density >= GEMINI_DOUBT_MIN && density <= GEMINI_DOUBT_MAX) {
+          const geminiDensity = await callGeminiForBubble(canvas, x, y, radiusPx);
+          if (geminiDensity !== null) {
+            density = geminiDensity;
+            geminiResolved++;
+          } else {
+            canvasResolved++;
+          }
         } else {
           canvasResolved++;
         }
-      } else {
-        canvasResolved++;
-      }
 
-      optionsDensity.push(Number(density.toFixed(4)));
+        optionsDensity.push(Number(density.toFixed(4)));
+      }
+      bubbleMatrix.push({ questionNumber: q, optionsDensity });
     }
-    bubbleMatrix.push({ questionNumber: q, optionsDensity });
+
+    console.log(`[OMR] Bubble resolution: ${canvasResolved} by canvas, ${geminiResolved} by Gemini`);
+    detectionMethod = geminiResolved > 0 ? 'canvas+gemini' : 'canvas';
   }
 
-  console.log(`[OMR] Bubble resolution: ${canvasResolved} by canvas, ${geminiResolved} by Gemini`);
+  // ── Step 3: Compute confidence & apply DeepSeek-VL fallback if needed ───────
+  const confidence = computeConfidenceScore(bubbleMatrix);
+  const xCount = bubbleMatrix.filter((row) => {
+    if (!Array.isArray(row.optionsDensity) || row.optionsDensity.length === 0) return true;
+    return Math.max(...row.optionsDensity) <= 0.5;
+  }).length;
+  const xRatio = bubbleMatrix.length > 0 ? xCount / bubbleMatrix.length : 0;
 
-  return { bubbleMatrix, qrToken };
+  console.log(
+    `[OMR] Confidence: ${confidence}% | X answers: ${xCount}/${bubbleMatrix.length} (${Math.round(xRatio * 100)}%) | Method: ${detectionMethod}`
+  );
+
+  const needsFallback =
+    confidence < DEEPSEEK_FALLBACK_CONFIDENCE_THRESHOLD ||
+    xRatio > DEEPSEEK_FALLBACK_MAX_X_RATIO;
+
+  if (needsFallback && process.env.REPLICATE_API_TOKEN) {
+    console.log('[OMR] Baja confianza — intentando fallback con DeepSeek-VL...');
+    try {
+      const base64Image = imageBuffer.toString('base64');
+      const vlResult = await validateBubblesFromImage(base64Image, nQ);
+
+      if (vlResult && Array.isArray(vlResult.answers) && vlResult.answers.length > 0) {
+        const vlConfidence = vlResult.confidence || 0;
+        console.log(`[OMR] DeepSeek-VL confidence: ${vlConfidence}%`);
+
+        // Usar DeepSeek-VL solo si su confianza es mayor que la del canvas/opencv
+        if (vlConfidence >= confidence) {
+          bubbleMatrix = answersToBubbleMatrix(vlResult.answers, nOpts);
+          detectionMethod = 'deepseek-vl-fallback';
+          console.log(`[OMR] Usando resultados de DeepSeek-VL (confianza ${vlConfidence}% vs ${confidence}%)`);
+        } else {
+          console.log(`[OMR] DeepSeek-VL no mejoró la confianza (${vlConfidence}% vs ${confidence}%) — manteniendo resultado original`);
+        }
+      }
+    } catch (vlErr) {
+      console.warn(`[OMR] DeepSeek-VL fallback error: ${vlErr.message} — usando resultado original`);
+    }
+  } else if (needsFallback && !process.env.REPLICATE_API_TOKEN) {
+    console.log('[OMR] DeepSeek-VL fallback omitido: REPLICATE_API_TOKEN no configurada');
+  }
+
+  return { bubbleMatrix, qrToken, detectionMethod, confidence };
 };
 
 // ─── PDF → page payloads ──────────────────────────────────────────────────────
@@ -367,5 +466,8 @@ module.exports = {
   generatePagePayloads,
   computeBubbleCenter,
   sampleCircleDensity,
-  DARK_THRESHOLD
+  computeConfidenceScore,
+  answersToBubbleMatrix,
+  DARK_THRESHOLD,
+  DEEPSEEK_FALLBACK_CONFIDENCE_THRESHOLD
 };

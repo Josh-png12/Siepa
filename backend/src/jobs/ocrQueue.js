@@ -307,7 +307,7 @@ const enqueueGeminiJob = ({ userId, schoolId, batchId, pdfPath, answersPdfPath =
     try {
       const { extractQuestionsFromPdf } = require('../services/pdfQuestionExtractor');
 
-      const { preguntas: geminiQuestions, paginasProcesadas } = await extractQuestionsFromPdf({
+      const { preguntas: extractedQuestions, paginasProcesadas } = await extractQuestionsFromPdf({
         filePath: pdfPath,
         onProgress: (progress) => {
           if (job.status !== 'canceled') {
@@ -322,7 +322,7 @@ const enqueueGeminiJob = ({ userId, schoolId, batchId, pdfPath, answersPdfPath =
       }
 
       // Normalize to the same shape ocrWorker produces so the frontend and confirmPreviewBatch work unchanged
-      const detectedQuestions = geminiQuestions.map((q, idx) => {
+      const detectedQuestions = extractedQuestions.map((q, idx) => {
         const opts = q.opciones || {};
         const options = ['A', 'B', 'C', 'D']
           .filter((k) => opts[k])
@@ -342,8 +342,8 @@ const enqueueGeminiJob = ({ userId, schoolId, batchId, pdfPath, answersPdfPath =
           answerGuess: null,
           options,
           confidence: 0.9,
-          flags: ['GEMINI_EXTRACTED'],
-          source: { _source: 'gemini-vision' }
+          flags: ['VL_EXTRACTED'],
+          source: { _source: 'deepseek-vl' }
         };
       });
 
@@ -356,10 +356,10 @@ const enqueueGeminiJob = ({ userId, schoolId, batchId, pdfPath, answersPdfPath =
         blocksDetected: [],
         blocks: [],
         pages: [],
-        stats: { engine: 'gemini-vision', pagesOcr: pages, pagesText: 0, pagesFailedOcr: 0 },
+        stats: { engine: 'deepseek-vl', pagesOcr: pages, pagesText: 0, pagesFailedOcr: 0 },
         warnings: detectedQuestions.length === 0
-          ? ['Gemini no detectó preguntas. Verifica que el PDF tenga contenido legible.']
-          : ['Las preguntas extraídas con Gemini Vision no incluyen respuesta correcta. Complétala en revisión.'],
+          ? ['DeepSeek-VL no detectó preguntas. Verifica que el PDF tenga contenido legible.']
+          : ['Las preguntas extraídas con IA no incluyen respuesta correcta. Complétala en revisión.'],
         progress: { currentPage: pages, totalPages: pages, percent: 100 }
       };
 

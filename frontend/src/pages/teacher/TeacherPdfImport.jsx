@@ -91,7 +91,7 @@ function TeacherPdfImport() {
             onChange={(e) => setUseVision(e.target.checked)}
             className="h-4 w-4 accent-violet-600"
           />
-          <span className="whitespace-nowrap font-medium">Usar vision IA (Gemini)</span>
+          <span className="whitespace-nowrap font-medium">Usar vision IA (DeepSeek-VL)</span>
         </label>
 
         <label className="cursor-pointer rounded-xl bg-[#0A2E57] px-4 py-2 text-center text-white hover:bg-[#123e71]">
@@ -110,7 +110,7 @@ function TeacherPdfImport() {
 
       {useVision && (
         <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-700">
-          Modo vision IA activo. Recomendado para PDFs con graficas e imagenes. Las preguntas se extraen con Gemini 2.0 Flash; debes completar la respuesta correcta en la vista de revision.
+          Modo vision IA activo. Recomendado para PDFs con graficas e imagenes. Las preguntas se extraen con DeepSeek-VL2; debes completar la respuesta correcta en la vista de revision.
         </div>
       )}
 

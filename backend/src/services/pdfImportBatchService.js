@@ -678,7 +678,7 @@ const createPreviewBatch = async ({ user, files, payload }) => {
       config: payload || {}
     });
 
-    console.log(`[PDF IMPORT] Job encolado con engine=${useVision ? 'gemini-vision' : 'tesseract'} jobId=${jobId}`);
+    console.log(`[PDF IMPORT] Job encolado con engine=${useVision ? 'deepseek-vl' : 'tesseract'} jobId=${jobId}`);
 
     await logAudit({
       schoolId,
@@ -686,7 +686,7 @@ const createPreviewBatch = async ({ user, files, payload }) => {
       action: `${getAuditPrefix(user)}.pdfImport.ocrQueued`,
       entityType: 'PdfImportBatch',
       entityId: created.id,
-      metadata: { jobId, engine: useVision ? 'gemini-vision' : 'tesseract' }
+      metadata: { jobId, engine: useVision ? 'deepseek-vl' : 'tesseract' }
     });
 
     return {

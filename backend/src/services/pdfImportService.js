@@ -81,7 +81,14 @@ const mapPreviewQuestionToQuestionData = (previewQuestion, user, schoolId) => {
     data: {
       schoolId,
       statementText: String(previewQuestion.statement || '').trim(),
-      statementImages: [],
+      statementImages: Array.isArray(previewQuestion.imageUrls) && previewQuestion.imageUrls.length > 0
+        ? previewQuestion.imageUrls.map((url) => ({
+            url,
+            caption: previewQuestion.imageDescription
+              ? String(previewQuestion.imageDescription).trim()
+              : 'Imagen de la pregunta'
+          }))
+        : [],
       latex: '',
       options,
       correctAnswer,
@@ -104,7 +111,7 @@ const mapPreviewQuestionToQuestionData = (previewQuestion, user, schoolId) => {
 
 const getAuditPrefix = (user) => (user?.role === 'admin' ? 'admin' : 'teacher');
 
-const processJobWithGemini = async (jobId, job) => {
+const processJobWithVision = async (jobId, job) => {
   const outputDir = resolveJobDir(job.id);
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -113,11 +120,10 @@ const processJobWithGemini = async (jobId, job) => {
     data: { status: 'extracting', errors: [] }
   });
 
-  const { preguntas: geminiQuestions, paginasProcesadas, paginasConPreguntas } = await extractQuestionsFromPdf({
+  // extractQuestionsFromPdf ya devuelve las preguntas mapeadas con mapToPreviewFormat
+  const { preguntas: previewQuestions, paginasProcesadas, paginasConPreguntas } = await extractQuestionsFromPdf({
     filePath: job.sourceFilePath
   });
-
-  const previewQuestions = mapToPreviewFormat(geminiQuestions);
 
   const parsedJsonPath = path.join(outputDir, 'parsed.json');
   await fs.writeFile(parsedJsonPath, JSON.stringify(previewQuestions, null, 2), 'utf8');
@@ -129,8 +135,8 @@ const processJobWithGemini = async (jobId, job) => {
       isScanned: true,
       parsedJsonPath,
       previewQuestions,
-      previewWarnings: ['Las preguntas extraídas con Gemini Vision no incluyen la respuesta correcta. Complétala en la vista de revisión antes de importar.'],
-      previewStats: { engine: 'gemini-vision', questionCount: previewQuestions.length, paginasProcesadas, paginasConPreguntas },
+      previewWarnings: ['Las preguntas extraídas con IA no incluyen la respuesta correcta. Complétala en la vista de revisión antes de importar.'],
+      previewStats: { engine: 'deepseek-vl', questionCount: previewQuestions.length, paginasProcesadas, paginasConPreguntas },
       status: 'previewReady'
     }
   });
@@ -144,8 +150,8 @@ const processJob = async (jobId) => {
   if (!['uploaded', 'extracting', 'parsing'].includes(job.status)) return job;
 
   try {
-    if (job.ocrEngine === 'gemini-vision') {
-      return await processJobWithGemini(jobId, job);
+    if (job.ocrEngine === 'deepseek-vl') {
+      return await processJobWithVision(jobId, job);
     }
 
 
@@ -165,10 +171,12 @@ const processJob = async (jobId) => {
       console.error('[PDF IMPORT] ARCHIVO NO EXISTE al procesar:', job.sourceFilePath);
     }
 
-    const extracted = await pdfExtractService.extract({
-      filePath: job.sourceFilePath,
-      outputDir
-    });
+const extracted = await pdfExtractService.extract({
+  filePath: job.sourceFilePath,
+  outputDir,
+  maxPages: 20,      // Procesa desde la página 5 hasta la 24 (20 páginas)
+  startPage: 5       // Empieza en la página 5 (saltas portada e índice)
+});
 
     const extractedTextPath = path.join(outputDir, 'extracted.txt');
     await fs.writeFile(extractedTextPath, extracted.text, 'utf8');
@@ -227,7 +235,7 @@ const createPdfImportJob = async ({ user, file, useVision = false }) => {
       sourceOriginalName: sourceName,
       sourceMimeType: file.mimetype || 'application/pdf',
       sourceSize: Number(file.size || 0),
-      ...(useVision ? { ocrEngine: 'gemini-vision' } : {})
+      ...(useVision ? { ocrEngine: 'deepseek-vl' } : {})
     }
   });
 

@@ -32,3 +32,5 @@ frontend/dist/
 
 # Coverage
 coverage/
+.vercel
+.env*

@@ -83,7 +83,10 @@ const validatePreviewQuestions = (questionsRaw) => {
       dificultadCualitativa,
       tri,
       confidence: Math.max(0, Math.min(1, confidence)),
-      flags
+      flags,
+      // Preservar campos de imágenes extraídas del PDF
+      imageUrls: Array.isArray(row?.imageUrls) ? row.imageUrls : [],
+      imageDescription: row?.imageDescription ? String(row.imageDescription).trim() : null
     };
   });
 

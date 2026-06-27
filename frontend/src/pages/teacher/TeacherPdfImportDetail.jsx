@@ -104,6 +104,8 @@ function TeacherPdfImportDetail() {
         questions: questions.map((item) => ({
           qNumber: item.qNumber,
           statement: item.statement,
+          imageUrls: item.imageUrls || [],
+          imageDescription: item.imageDescription || null,
           options: item.options,
           detectedAnswer: item.detectedAnswer || null,
           explanation: item.explanation || '',
@@ -227,6 +229,28 @@ function TeacherPdfImportDetail() {
                   onChange={(event) => updateQuestionField(idx, 'statement', event.target.value)}
                   className="mb-3 w-full rounded-xl border border-slate-300 px-3 py-2"
                 />
+
+                {/* Mostrar imágenes extraídas del PDF */}
+                {Array.isArray(q.imageUrls) && q.imageUrls.length > 0 && (
+                  <div className="mb-3 space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase">Imágenes de la pregunta</p>
+                    <div className="flex flex-wrap gap-2">
+                      {q.imageUrls.map((url, imgIdx) => (
+                        <div key={imgIdx} className="relative rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                          <img
+                            src={url}
+                            alt={`Imagen pregunta ${q.qNumber} #${imgIdx + 1}`}
+                            className="max-w-full max-h-64 object-contain"
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {q.imageDescription && !(Array.isArray(q.imageUrls) && q.imageUrls.length > 0) && (
+                  <p className="mb-3 text-sm text-slate-500 italic">[Imagen: {q.imageDescription}]</p>
+                )}
 
                 <div className="grid gap-2 md:grid-cols-2">
                   {(q.options || []).map((option) => (
