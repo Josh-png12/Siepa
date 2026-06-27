@@ -9,7 +9,7 @@ export const adminTokens = {
   },
   classes: {
     page: 'space-y-6',
-    title: 'text-2xl font-bold text-[#0A2E57]',
+    title: 'text-xl md:text-2xl font-bold text-[#0A2E57]',
     subtitle: 'text-sm text-slate-600',
     card: 'bg-white rounded-2xl shadow-sm border border-slate-100',
     sectionHeader: 'font-semibold text-[#0A2E57]',
@@ -20,7 +20,7 @@ export const adminTokens = {
     badge: 'px-2 py-1 rounded-full text-xs font-semibold'
   },
   spacing: {
-    page: 'p-6',
+    page: 'p-4 md:p-6',
     card: 'p-4'
   },
   radius: {
