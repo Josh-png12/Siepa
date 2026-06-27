@@ -68,120 +68,160 @@ npm run dev
 
 ---
 
-## 🚀 Despliegue en Producción
+## 🚀 Despliegue en Producción (Servidor Propio)
 
 ### Arquitectura de Producción
 
 ```
-┌──────────────────────┐     ┌──────────────────────┐
-│   Vercel (Frontend)  │────▶│   Render (Backend)   │────▶ Neon (PostgreSQL)
-│   siepa.vercel.app   │     │   siepa-api.onrender │
-│   React + Vite       │     │   Node.js + Express  │
-└──────────────────────┘     └──────────────────────┘
+┌──────────────────────────────────────────────────┐
+│              Servidor Clouding.io                 │
+│              IP: 187.33.148.149                   │
+│                                                   │
+│  ┌─────────────────┐  ┌───────────────────────┐  │
+│  │     Nginx        │  │   PM2 (Node.js)       │  │
+│  │  :80 / :443      │  │   siepa-backend       │  │
+│  │                  │  │   :5000               │  │
+│  │  /var/www/html/  │  │                       │  │
+│  │  (Frontend)      │  │   PostgreSQL :5432    │  │
+│  └────────┬─────────┘  └───────────┬───────────┘  │
+│           │                        │               │
+│           └──────── API ──────────┘               │
+└──────────────────────────────────────────────────┘
 ```
 
-### 1. Base de Datos - Neon
+### 1. Requisitos del Servidor
 
-1. Crea una cuenta en [neon.tech](https://neon.tech)
-2. Crea un nuevo proyecto y base de datos
-3. Copia la URL de conexión (formato: `postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/db?sslmode=require`)
-4. Esta URL se usará como `DATABASE_URL` en Render
+- Ubuntu 22.04+ con acceso root
+- Node.js >= 20.x
+- PostgreSQL 14+
+- Nginx
+- PM2 (`npm install -g pm2`)
+- Git
 
-### 2. Backend - Render
-
-#### Configuración del Servicio
-
-1. Crea una cuenta en [render.com](https://render.com)
-2. Crea un nuevo **Web Service**
-3. Conecta tu repositorio de GitHub
-4. Configura el servicio:
-
-| Campo | Valor |
-|-------|-------|
-| **Name** | `siepa-api` |
-| **Runtime** | Node |
-| **Build Command** | `cd backend && npm install && npx prisma generate` |
-| **Start Command** | `cd backend && npm run start:prod` |
-| **Root Directory** | _(dejar vacío)_ |
-
-#### Variables de Entorno en Render
-
-Configura las siguientes variables en **Environment → Environment Variables**:
-
-| Variable | Valor | Obligatorio |
-|----------|-------|:-----------:|
-| `NODE_ENV` | `production` | ✅ |
-| `PORT` | `5000` | ✅ |
-| `DATABASE_URL` | `postgresql://user:pass@ep-xxx...` (Neon) | ✅ |
-| `JWT_SECRET` | _(genera un secreto seguro)_ | ✅ |
-| `CORS_ORIGIN` | `https://siepa.vercel.app` | ✅ |
-| `REPLICATE_API_TOKEN` | `r8_...` | Recomendado |
-| `DEEPSEEK_API_KEY` | `sk-...` | Opcional |
-
-> **Generar JWT_SECRET**: Ejecuta `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` en tu terminal.
-
-#### Migraciones de Base de Datos
-
-Después del primer deploy, ejecuta las migraciones manualmente (solo la primera vez):
+### 2. Clonar e instalar
 
 ```bash
-# Desde tu máquina local, apuntando a la DB de Neon:
-cd backend
-DATABASE_URL="postgresql://..." npx prisma migrate deploy
+cd /root
+git clone https://github.com/TU_USUARIO/siepa-ap.git
+cd siepa-ap
+
+# Backend
+cd backend && npm install --production && npx prisma generate
+
+# Frontend
+cd ../frontend && npm install && npm run build
 ```
 
-O usa el comando disponible en Render:
-```bash
-cd backend && npm run prisma:deploy
-```
-
-### 3. Frontend - Vercel
-
-#### Configuración del Proyecto
-
-1. Crea una cuenta en [vercel.com](https://vercel.com)
-2. Importa tu repositorio de GitHub
-3. Configura el proyecto:
-
-| Campo | Valor |
-|-------|-------|
-| **Framework** | Vite |
-| **Build Command** | `cd frontend && npm run build` |
-| **Output Directory** | `frontend/dist` |
-| **Root Directory** | `frontend` |
-
-#### Variables de Entorno en Vercel
-
-En **Settings → Environment Variables**:
-
-| Variable | Valor |
-|----------|-------|
-| `VITE_API_URL` | `https://siepa-api.onrender.com/api` |
-
-### 4. Verificación
-
-Después del despliegue, verifica que todo funcione:
+### 3. Configurar base de datos
 
 ```bash
-# Verificar backend
-curl https://siepa-api.onrender.com/
-# Respuesta esperada: {"status":"ok","service":"SIEPA Backend"...}
+sudo -u postgres psql -c "CREATE DATABASE siepa;"
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'tu_password_segura';"
 
-curl https://siepa-api.onrender.com/health
-# Respuesta esperada: {"status":"healthy"...}
-
-# Verificar frontend
-# Abre https://siepa.vercel.app en el navegador
-# Prueba el login, creación de simulacros, etc.
+cd /root/siepa-ap/backend
+npx prisma migrate deploy
 ```
+
+### 4. Variables de entorno
+
+Copia y edita `backend/.env`:
+
+```env
+NODE_ENV=production
+PORT=5000
+JWT_SECRET=tu_secreto_jwt_generado
+CORS_ORIGIN=http://187.33.148.149
+DATABASE_URL=postgresql://postgres:tu_password@localhost:5432/siepa
+REPLICATE_API_TOKEN=r8_...    # Opcional
+DEEPSEEK_API_KEY=sk-...       # Opcional
+```
+
+> **Generar JWT_SECRET**: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
+
+### 5. Configurar Nginx
+
+Crear `/etc/nginx/sites-available/siepa`:
+
+```nginx
+server {
+    listen 80;
+    server_name 187.33.148.149;
+
+    root /var/www/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 300s;
+    }
+
+    location /uploads/ {
+        proxy_pass http://localhost:5000/uploads/;
+    }
+}
+```
+
+Activar:
+```bash
+ln -s /etc/nginx/sites-available/siepa /etc/nginx/sites-enabled/
+rm /etc/nginx/sites-enabled/default
+nginx -t && systemctl restart nginx
+```
+
+### 6. Desplegar frontend
+
+```bash
+cp -r /root/siepa-ap/frontend/dist/* /var/www/html/
+```
+
+### 7. Iniciar backend con PM2
+
+```bash
+cd /root/siepa-ap/backend
+pm2 start src/app.js --name siepa-backend
+pm2 save
+pm2 startup
+```
+
+### 8. Verificación
+
+```bash
+curl http://localhost:5000/       # Backend health
+curl http://localhost/            # Frontend
+```
+
+### 9. Despliegue continuo (CI/CD)
+
+Configura un webhook en GitHub que apunte a tu servidor. Al hacer `git push` a `master`, el script `deploy.sh` se encarga de:
+
+1. `git pull`
+2. Instalar dependencias
+3. Construir frontend
+4. Copiar a `/var/www/html/`
+5. Reiniciar PM2 y Nginx
+
+```bash
+# En el servidor:
+./deploy.sh
+```
+
+> Consulta [DEPLOY.md](./DEPLOY.md) para instrucciones detalladas de CI/CD, webhooks y mantenimiento.
 
 ### URLs de Producción
 
 | Servicio | URL |
 |----------|-----|
-| **Frontend** | `https://siepa.vercel.app` |
-| **Backend API** | `https://siepa-api.onrender.com` |
-| **API Health** | `https://siepa-api.onrender.com/health` |
+| **Frontend** | `http://187.33.148.149` |
+| **Backend API** | `http://187.33.148.149/api` |
+| **API Health** | `http://187.33.148.149/api/health` |
 
 ---
 
@@ -323,10 +363,8 @@ node test-replicate.js
 
 ### Archivos Subidos (Uploads)
 
-En **Render**, el sistema de archivos es efímero. Los archivos subidos se pierden al reiniciar el servicio.
 El backend crea automáticamente los directorios necesarios al iniciar (`uploads/`, `uploads/extracted/`, etc.).
-
-Para producción real con archivos persistentes, considera usar:
+En servidor propio los archivos son persistentes. Para escalar horizontalmente o usar almacenamiento externo, considera:
 - **Cloudinary** para imágenes
 - **AWS S3** o **Cloudflare R2** para PDFs y documentos
 - **Supabase Storage** como alternativa simple
@@ -337,11 +375,16 @@ El backend usa **Winston** para logs estructurados:
 - En desarrollo: formato legible con colores
 - En producción: JSON estructurado para integración con sistemas de monitoreo
 
+Puedes ver los logs en tiempo real con:
+```bash
+pm2 logs siepa-backend
+```
+
 ### Monitoreo
 
-Render proporciona logs en tiempo real en su dashboard. Para monitoreo avanzado, considera:
-- Render Log Streams
-- Integración con Datadog / New Relic (disponible en planes de pago de Render)
+- **PM2**: `pm2 monit` para monitoreo en tiempo real
+- **Nginx**: Logs en `/var/log/nginx/`
+- Para monitoreo avanzado, integra con Datadog, New Relic o Grafana
 
 ### Rate Limiting
 

@@ -5,6 +5,7 @@ package-lock.json
 # Environment
 .env
 .env.local
+.env.*.local
 
 # Logs
 *.log
@@ -33,4 +34,3 @@ frontend/dist/
 # Coverage
 coverage/
 .vercel
-.env*

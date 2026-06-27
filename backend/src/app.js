@@ -52,11 +52,6 @@ const corsOrigin = process.env.CORS_ORIGIN
       'http://localhost:3000',
     ];
 
-// Always allow the production frontend URL when CORS_ORIGIN is not explicitly set
-if (!process.env.CORS_ORIGIN && process.env.NODE_ENV === 'production') {
-  corsOrigin.push('https://siepa.vercel.app');
-}
-
 logger.info(`CORS origins: ${corsOrigin.join(', ')}`);
 
 app.use(cors({
@@ -86,7 +81,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "blob:"],
-      connectSrc: ["'self'", process.env.CORS_ORIGIN || "https://siepa.vercel.app"].flat(),
+      connectSrc: ["'self'", process.env.CORS_ORIGIN || "'none'"],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: [],
