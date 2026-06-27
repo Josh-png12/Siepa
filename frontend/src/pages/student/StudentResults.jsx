@@ -91,7 +91,7 @@ function StudentResults() {
     labels: (data?.timeline || []).map((item) => new Date(item.date).toLocaleDateString('es-CO')),
     datasets: [
       {
-        label: 'Score global',
+        label: 'Puntaje total',
         data: (data?.timeline || []).map((item) => item.score),
         borderColor: '#0F2D52',
         backgroundColor: 'rgba(15,45,82,0.2)',
@@ -214,7 +214,7 @@ function StudentResults() {
               <p><strong>Puntaje:</strong> {currentArea.score0_100 ?? '-'}</p>
               <p><strong>Nivel:</strong> {currentArea.level}</p>
               <p><strong>Percentil:</strong> {currentArea.percentile ?? '-'}</p>
-              <p><strong>Theta:</strong> {currentArea.theta ?? '-'}</p>
+              <p><strong>Nivel académico:</strong> {currentArea.theta ?? '-'}</p>
             </div>
 
             <div className="rounded-xl bg-slate-50 p-3 text-sm">
@@ -256,7 +256,7 @@ function StudentResults() {
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-3 text-sm">
             <p><strong>Score:</strong> {detail.globalScore ?? '-'}</p>
-            <p><strong>Theta:</strong> {detail.theta ?? '-'}</p>
+            <p><strong>Nivel académico:</strong> {detail.theta ?? '-'}</p>
             <p><strong>Percentil:</strong> {detail.percentile ?? '-'}</p>
           </div>
         </section>

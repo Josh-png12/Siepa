@@ -59,7 +59,7 @@ function CourseDashboard() {
   const metricCards = useMemo(
     () => [
       { label: 'Total estudiantes', value: dashboard?.metrics?.totalStudents || 0, tone: 'info' },
-      { label: 'Theta promedio', value: Number(insights?.metrics?.averageTheta || dashboard?.metrics?.thetaAverage || 0).toFixed(2), tone: 'ok' },
+      { label: 'Nivel académico', value: Number(insights?.metrics?.averageTheta || dashboard?.metrics?.thetaAverage || 0).toFixed(2), tone: 'ok' },
       { label: 'Competencia mas debil', value: insights?.metrics?.weakestCompetency || 'N/A', tone: 'warning' },
       { label: 'En riesgo', value: insights?.metrics?.atRiskStudents || dashboard?.metrics?.studentsAtRisk || 0, tone: 'danger' },
       { label: 'Horas semanales', value: Number(dashboard?.metrics?.weeklyHours || 0).toFixed(1), tone: 'info' },
@@ -107,7 +107,7 @@ function CourseDashboard() {
       <ConfirmModal
         isOpen={showReportConfirm}
         title="Generar reporte PDF"
-        description="Se generara un reporte institucional con metricas, riesgo e insights del curso."
+        description="Se generará un reporte institucional con métricas, riesgo y análisis del curso."
         confirmLabel={downloading ? 'Generando...' : 'Descargar reporte'}
         onConfirm={handleDownloadReport}
         onCancel={() => setShowReportConfirm(false)}
@@ -145,7 +145,7 @@ function CourseDashboard() {
 
       <section className="grid xl:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-lg font-semibold text-[#0A2E57] mb-3">Tendencia de theta en el tiempo</h2>
+          <h2 className="text-lg font-semibold text-[#0A2E57] mb-3">Tendencia del nivel académico</h2>
           <div className="h-72">
             <Suspense fallback={<LoadingSkeleton className="h-full" />}>
               <LazyCharts variant="thetaTrend" trend={insights?.charts?.thetaTrend || []} />
@@ -181,7 +181,7 @@ function CourseDashboard() {
             {paginatedRiskRows.map((row) => (
               <div key={row.studentId} className="grid md:grid-cols-5 gap-2 items-center p-3 bg-slate-50 rounded-lg text-sm">
                 <p className="font-medium text-slate-800">{row.name}</p>
-                <p>Theta {Number(row.theta || 0).toFixed(2)}</p>
+                <p>Nivel {Number(row.theta || 0).toFixed(2)}</p>
                 <p>Tendencia {Number(row.trend || 0).toFixed(2)}</p>
                 <p>{row.daysWithoutActivity} dias sin actividad</p>
                 <div>
@@ -213,7 +213,7 @@ function CourseDashboard() {
       </section>
 
       <section className="bg-white rounded-2xl shadow p-5 space-y-3">
-        <h2 className="text-lg font-semibold text-[#0A2E57]">Performance Heatmap</h2>
+        <h2 className="text-lg font-semibold text-[#0A2E57]">Mapa de desempeño</h2>
         {(insights?.charts?.heatmap || []).length === 0 ? (
           <EmptyState title="Sin datos para heatmap" description="No hay competencias suficientes para construir el mapa." />
         ) : (
@@ -224,7 +224,7 @@ function CourseDashboard() {
       </section>
 
       <section className="bg-white rounded-2xl shadow p-5 space-y-3">
-        <h2 className="text-lg font-semibold text-[#0A2E57]">Smart insights accionables</h2>
+        <h2 className="text-lg font-semibold text-[#0A2E57]">Análisis y recomendaciones</h2>
         <div className="flex flex-wrap gap-2">
           {(insights?.insights?.recommendedCompetencies || []).map((item) => (
             <StatusBadge key={item} label={`Reforzar ${item}`} tone="warning" />

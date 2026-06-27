@@ -160,7 +160,7 @@ function SimulacroAutoCreate() {
             checked={header.strictMode}
             onChange={(event) => setHeader((prev) => ({ ...prev, strictMode: event.target.checked }))}
           />
-          Strict mode
+          Modo examen (sin retroceder)
         </label>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -212,7 +212,7 @@ function SimulacroAutoCreate() {
               value={moduleItem.targetTheta}
               onChange={(event) => setModuleField(moduleItem.name, 'targetTheta', event.target.value)}
               className="border rounded-lg px-3 py-2"
-              placeholder="Theta objetivo"
+              placeholder="Nivel objetivo"
             />
             <input
               type="number"
@@ -242,7 +242,7 @@ function SimulacroAutoCreate() {
                 <div key={question._id} className="border rounded-lg p-3">
                   <p className="font-medium">#{idx + 1} - {question.statement?.text || question.latex || '(sin texto)'}</p>
                   <p className="text-xs text-gray-600">
-                    {question.area} | {question.competencia} | b={Number(question.triParams?.b ?? 0).toFixed(2)}
+                    {question.area} | {question.competencia}
                   </p>
                 </div>
               ))

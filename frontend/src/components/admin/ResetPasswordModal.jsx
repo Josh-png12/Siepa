@@ -36,7 +36,7 @@ function ResetPasswordModal({ isOpen, user, loading = false, onClose, onSubmit }
   return (
     <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-        <h3 className="text-lg font-semibold text-[#0A2E57]">Reset Password</h3>
+        <h3 className="text-lg font-semibold text-[#0A2E57]">Restablecer contraseña</h3>
         <p className="text-sm text-slate-600">
           {`Usuario: ${user?.name || ''} (${user?.email || ''})`}
         </p>
@@ -72,7 +72,7 @@ function ResetPasswordModal({ isOpen, user, loading = false, onClose, onSubmit }
               disabled={!canSubmit}
               className="px-4 py-2 rounded-lg bg-[#0A2E57] text-white disabled:opacity-60"
             >
-              {loading ? 'Guardando...' : 'Confirmar reset'}
+              {loading ? 'Guardando...' : 'Confirmar cambio'}
             </button>
           </div>
         </form>

@@ -89,10 +89,9 @@ function QuestionFilters({ value, onApply, onReset, loading }) {
           onChange={handleChange}
           className="border rounded-lg px-3 py-2"
         >
-          <option value="">Calibracion</option>
-          {CALIB_OPTIONS.map((status) => (
-            <option key={status} value={status}>{status}</option>
-          ))}
+          <option value="">Calibración</option>
+          <option value="experimental">Experimental</option>
+          <option value="calibrated">Calibrada</option>
         </select>
       </div>
 
@@ -104,9 +103,9 @@ function QuestionFilters({ value, onApply, onReset, loading }) {
           className="border rounded-lg px-3 py-2"
         >
           <option value="">Visibilidad</option>
-          {VISIBILITY_OPTIONS.map((visibility) => (
-            <option key={visibility} value={visibility}>{visibility}</option>
-          ))}
+          <option value="private">Privada</option>
+          <option value="institutional">Institucional</option>
+          <option value="national">Nacional</option>
         </select>
 
         <input
@@ -123,7 +122,7 @@ function QuestionFilters({ value, onApply, onReset, loading }) {
           name="bMin"
           value={local.bMin}
           onChange={handleChange}
-          placeholder="TRI b minimo"
+          placeholder="Dificultad mínima"
           className="border rounded-lg px-3 py-2"
         />
 
@@ -133,7 +132,7 @@ function QuestionFilters({ value, onApply, onReset, loading }) {
           name="bMax"
           value={local.bMax}
           onChange={handleChange}
-          placeholder="TRI b maximo"
+          placeholder="Dificultad máxima"
           className="border rounded-lg px-3 py-2"
         />
       </div>
@@ -143,19 +142,19 @@ function QuestionFilters({ value, onApply, onReset, loading }) {
           <option value="updatedAt:desc">Actualizacion desc</option>
           <option value="updatedAt:asc">Actualizacion asc</option>
           <option value="createdAt:desc">Creacion desc</option>
-          <option value="triParams.b:asc">TRI b asc</option>
-          <option value="triParams.b:desc">TRI b desc</option>
-          <option value="dificultadCualitativa:asc">Dificultad asc</option>
-          <option value="dificultadCualitativa:desc">Dificultad desc</option>
+          <option value="triParams.b:asc">Dificultad asc</option>
+          <option value="triParams.b:desc">Dificultad desc</option>
+          <option value="dificultadCualitativa:asc">Dificultad cualitativa asc</option>
+          <option value="dificultadCualitativa:desc">Dificultad cualitativa desc</option>
         </select>
 
         <select name="sort2" value={local.sort2} onChange={handleChange} className="border rounded-lg px-3 py-2">
           <option value="">Sin segundo orden</option>
           <option value="updatedAt:desc">Actualizacion desc</option>
           <option value="updatedAt:asc">Actualizacion asc</option>
-          <option value="triParams.b:asc">TRI b asc</option>
-          <option value="triParams.b:desc">TRI b desc</option>
-          <option value="calibrationStatus:asc">Calibracion asc</option>
+          <option value="triParams.b:asc">Dificultad asc</option>
+          <option value="triParams.b:desc">Dificultad desc</option>
+          <option value="calibrationStatus:asc">Calibración asc</option>
           <option value="visibility:asc">Visibilidad asc</option>
         </select>
 

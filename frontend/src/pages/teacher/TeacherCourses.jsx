@@ -50,7 +50,7 @@ function TeacherCourses() {
               <div className="text-4xl">📊</div>
               <div>
                 <p className="text-5xl font-bold text-[#002855]">{course.averageTheta.toFixed(2)}</p>
-                <p className="text-sm text-gray-500">θ Promedio</p>
+                <p className="text-sm text-gray-500">Nivel académico</p>
               </div>
             </div>
 
@@ -72,7 +72,7 @@ function TeacherCourses() {
               <th className="pb-4">Grupo</th>
               <th className="pb-4">Nivel</th>
               <th className="pb-4">Estudiantes</th>
-              <th className="pb-4">θ promedio</th>
+              <th className="pb-4">Nivel académico</th>
               <th className="pb-4">Estado</th>
               <th className="pb-4">Acciones</th>
             </tr>

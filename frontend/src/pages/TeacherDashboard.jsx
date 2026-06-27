@@ -88,7 +88,7 @@ function TeacherDashboard() {
             <p className="text-5xl font-bold text-[#0A2E57] mt-4">{dashboard?.totalStudents || 0}</p>
           </div>
           <div className="bg-white rounded-3xl p-8 shadow hover:shadow-xl transition">
-            <p className="text-gray-500 text-sm">Promedio θ</p>
+            <p className="text-gray-500 text-sm">Nivel académico</p>
             <p className="text-5xl font-bold text-[#0A2E57] mt-4">{dashboard?.averageTheta.toFixed(2) || 0}</p>
           </div>
           <div className="bg-white rounded-3xl p-8 shadow hover:shadow-xl transition">

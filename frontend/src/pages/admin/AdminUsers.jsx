@@ -85,7 +85,7 @@ function AdminUsers() {
   const toggleFeature = async (user, key) => {
     const current = Boolean(user.features?.[key]);
     await adminPatchUser(user.id, { features: { ...user.features, [key]: !current } });
-    setToast({ type: 'success', message: `Feature ${key} actualizada.` });
+    setToast({ type: 'success', message: 'Función actualizada correctamente.' });
     load();
   };
 
@@ -193,9 +193,9 @@ function AdminUsers() {
           </select>
           <select className={`${adminTokens.classes.input} w-full`} value={query.status} onChange={(e) => setQuery((q) => ({ ...q, page: 1, status: e.target.value }))}>
             <option value="">Todos</option>
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
-            <option value="suspended">suspended</option>
+            <option value="active">Activo</option>
+            <option value="inactive">Inactivo</option>
+            <option value="suspended">Suspendido</option>
           </select>
           <button type="button" className={adminTokens.classes.buttonGhost} onClick={() => setQuery(defaultQuery)}>Reset filtros</button>
         </div>
@@ -220,7 +220,7 @@ function AdminUsers() {
                 <th className="p-3">Email</th>
                 <th className="p-3">Rol</th>
                 <th className="p-3">Estado</th>
-                <th className="p-3">Features</th>
+                <th className="p-3">Funciones</th>
                 <th className="p-3">Acciones</th>
               </tr>
             </thead>
@@ -232,20 +232,20 @@ function AdminUsers() {
                   <td className="p-3">{user.role}</td>
                   <td className="p-3">
                     <span className={`${adminTokens.classes.badge} ${user.status === 'active' ? adminTokens.colors.successSoft : user.status === 'suspended' ? adminTokens.colors.warningSoft : adminTokens.colors.dangerSoft}`}>
-                      {user.status}
+                      {user.status === 'active' ? 'Activo' : user.status === 'suspended' ? 'Suspendido' : 'Inactivo'}
                     </span>
                   </td>
                   <td className="p-3 space-y-1">
                     <button type="button" onClick={() => toggleFeature(user, 'physicalSimulacros')} className="px-2 py-1 text-xs rounded bg-slate-100">
-                      physicalSimulacros: {user.features?.physicalSimulacros ? 'on' : 'off'}
+                      Simulacros físicos: {user.features?.physicalSimulacros ? 'Activo' : 'Inactivo'}
                     </button>
                     <button type="button" onClick={() => toggleFeature(user, 'ocrEnabled')} className="px-2 py-1 text-xs rounded bg-slate-100 ml-1">
-                      ocrEnabled: {user.features?.ocrEnabled === false ? 'off' : 'on'}
+                      Lectura automática: {user.features?.ocrEnabled === false ? 'Inactivo' : 'Activo'}
                     </button>
                   </td>
                   <td className="p-3 space-x-2">
                     <button type="button" onClick={() => suspend(user.id)} className="px-2 py-1 bg-amber-500 text-white rounded">Suspender</button>
-                    <button type="button" onClick={() => setResetUser(user)} className="px-2 py-1 bg-blue-600 text-white rounded">Reset Password</button>
+                    <button type="button" onClick={() => setResetUser(user)} className="px-2 py-1 bg-blue-600 text-white rounded">Restablecer contraseña</button>
                     <button type="button" onClick={() => setConfirmDeleteId(user.id)} className="px-2 py-1 bg-red-600 text-white rounded">Eliminar</button>
                   </td>
                 </tr>

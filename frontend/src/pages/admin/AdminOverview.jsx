@@ -110,12 +110,12 @@ function AdminOverview() {
             <EmptyState title="Sin configuracion" description="No hay configuracion global registrada." actionLabel="Ir a configuracion" onAction={() => navigate('/dashboard/admin/config')} />
           ) : (
             <div className="mt-3 grid md:grid-cols-2 gap-3 text-sm">
-              <StatusRow label="maxUploadMB" value={config.maxUploadMB} />
-              <StatusRow label="ocrReviewWindowDays" value={config.ocrReviewWindowDays} />
-              <StatusRow label="fileRetentionDays" value={config.fileRetentionDays} />
-              <StatusRow label="OCR Global" value={config?.featuresEnabled?.ocrGlobal ? 'Activo' : 'Inactivo'} />
-              <StatusRow label="Physical Global" value={config?.featuresEnabled?.physicalSimulacrosGlobal ? 'Activo' : 'Inactivo'} />
-              <StatusRow label="Question Moderation" value={config?.featuresEnabled?.questionModeration ? 'Activa' : 'Inactiva'} />
+              <StatusRow label="Tamaño máximo de archivo (MB)" value={config.maxUploadMB} />
+              <StatusRow label="Días de revisión OCR" value={config.ocrReviewWindowDays} />
+              <StatusRow label="Días de retención de archivos" value={config.fileRetentionDays} />
+              <StatusRow label="Lectura automática (global)" value={config?.featuresEnabled?.ocrGlobal ? 'Activo' : 'Inactivo'} />
+              <StatusRow label="Simulacros físicos (global)" value={config?.featuresEnabled?.physicalSimulacrosGlobal ? 'Activo' : 'Inactivo'} />
+              <StatusRow label="Moderación de preguntas" value={config?.featuresEnabled?.questionModeration ? 'Activa' : 'Inactiva'} />
             </div>
           )}
         </div>

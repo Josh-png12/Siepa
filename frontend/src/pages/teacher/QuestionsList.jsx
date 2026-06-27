@@ -214,7 +214,7 @@ function QuestionsList() {
       <QuestionFilters value={filters} onApply={onApplyFilters} onReset={onResetFilters} loading={loading} />
 
       <section className="bg-white rounded-2xl shadow p-6 space-y-3">
-        <h2 className="text-xl font-semibold text-[#0A2E57]">Importacion masiva (CSV/XLSX)</h2>
+        <h2 className="text-xl font-semibold text-[#0A2E57]">Importación masiva (CSV/XLSX)</h2>
 
         <input type="file" accept=".csv,.xlsx" onChange={(event) => setImportFile(event.target.files?.[0] || null)} />
 
@@ -272,11 +272,9 @@ function QuestionsList() {
           <thead>
             <tr className="text-left border-b bg-gray-50">
               <th className="p-4">Enunciado</th>
-              <th className="p-4">Area</th>
+              <th className="p-4">Área</th>
               <th className="p-4">Competencia</th>
-              <th className="p-4">Diff</th>
-              <th className="p-4">b</th>
-              <th className="p-4">Calibracion</th>
+              <th className="p-4">Dificultad</th>
               <th className="p-4">Visibilidad</th>
               <th className="p-4">Estado</th>
               <th className="p-4">Acciones</th>
@@ -285,11 +283,11 @@ function QuestionsList() {
           <tbody>
             {loading ? (
               <tr>
-                <td className="p-4" colSpan="9">Cargando preguntas...</td>
+                <td className="p-4" colSpan="7">Cargando preguntas...</td>
               </tr>
             ) : questions.length === 0 ? (
               <tr>
-                <td className="p-4 text-gray-500" colSpan="9">No hay preguntas para mostrar.</td>
+                <td className="p-4 text-gray-500" colSpan="7">No hay preguntas para mostrar.</td>
               </tr>
             ) : (
               questions.map((question) => {
@@ -302,8 +300,6 @@ function QuestionsList() {
                     <td className="p-4">{question.area}</td>
                     <td className="p-4">{question.competencia}</td>
                     <td className="p-4">{question.dificultadCualitativa}</td>
-                    <td className="p-4">{Number(question.triParams?.b ?? 0).toFixed(2)}</td>
-                    <td className="p-4">{question.calibrationStatus}</td>
                     <td className="p-4">{question.visibility}</td>
                     <td className="p-4">{question.estado}</td>
                     <td className="p-4">

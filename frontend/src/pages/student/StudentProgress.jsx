@@ -93,7 +93,7 @@ function CompetencyCard({ item }) {
         />
       </div>
       <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-        <span>Theta {Number(item.theta || 0).toFixed(2)}</span>
+        <span>Nivel {Number(item.theta || 0).toFixed(2)}</span>
         <span>{item.questionsAnswered} preg.</span>
       </div>
     </div>
@@ -126,7 +126,7 @@ function StudentProgress() {
     labels: (data?.thetaSeries || []).map((p) =>
       new Date(p.date).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })),
     datasets: [{
-      label: 'Theta',
+      label: 'Nivel académico',
       data: (data?.thetaSeries || []).map((p) => p.theta),
       borderColor: '#3b82f6',
       backgroundColor: 'rgba(59,130,246,0.1)',
@@ -175,7 +175,7 @@ function StudentProgress() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-[#1e3a5f]">Mi Progreso</h1>
-        <p className="text-sm text-slate-400 mt-1">Evolución de theta, desempeño por área y señales de riesgo cognitivo.</p>
+        <p className="text-sm text-slate-400 mt-1">Evolución de tu nivel académico, desempeño por área y señales de riesgo.</p>
       </div>
 
       {/* Risk banner */}
@@ -217,8 +217,8 @@ function StudentProgress() {
       <section className="grid gap-4 lg:grid-cols-2">
         {/* Theta evolution */}
         <article className="bg-white rounded-2xl border border-slate-100 shadow-md p-5">
-          <h2 className="font-bold text-[#1e3a5f] mb-1">Evolución theta</h2>
-          <p className="text-xs text-slate-400 mb-4">Nivel IRT a lo largo del tiempo</p>
+          <h2 className="font-bold text-[#1e3a5f] mb-1">Evolución del nivel académico</h2>
+          <p className="text-xs text-slate-400 mb-4">Tu nivel a lo largo del tiempo</p>
           {hasThetaSeries ? (
             <div className="h-64">
               <Line

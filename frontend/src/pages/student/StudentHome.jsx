@@ -157,7 +157,7 @@ function StudentHome() {
     return {
       labels: series.map((p) => new Date(p.date).toLocaleDateString('es-CO', { weekday: 'short' })),
       datasets: [{
-        label: 'Theta semanal',
+        label: 'Nivel semanal',
         data: series.map((p) => p.theta),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59,130,246,0.12)',
@@ -198,7 +198,7 @@ function StudentHome() {
       {/* KPI grid */}
       <section className="grid gap-4 grid-cols-2 md:grid-cols-4">
         <KpiCard
-          title="Theta ICFES"
+          title="Nivel académico"
           rawValue={data?.kpis?.thetaActual ?? 0}
           format="decimal"
           icon="🧠"
@@ -207,7 +207,7 @@ function StudentHome() {
           delay={0}
         />
         <KpiCard
-          title="Score global"
+          title="Puntaje total"
           rawValue={data?.kpis?.scoreGlobal ?? 0}
           icon="🏆"
           colorFn={scoreColor}
@@ -338,7 +338,7 @@ function StudentHome() {
                   </div>
                   <div className="text-right">
                     <p className={`text-lg font-black ${scoreColor(item.score)}`}>{item.score}</p>
-                    <p className="text-xs text-slate-400">P{item.percentile}</p>
+                    <p className="text-xs text-slate-400">Percentil {item.percentile}</p>
                   </div>
                 </div>
               ))}

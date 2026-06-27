@@ -110,7 +110,7 @@ function UploadMaterialModal({
               min="-3"
               max="3"
               step="0.1"
-              placeholder="Theta Target"
+              placeholder="Nivel objetivo"
               value={form.thetaTarget}
               onChange={(event) => setForm((prev) => ({ ...prev, thetaTarget: event.target.value }))}
               className="border rounded-lg px-3 py-2"

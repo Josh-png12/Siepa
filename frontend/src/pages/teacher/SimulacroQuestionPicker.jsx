@@ -199,9 +199,8 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
                 <tr className="bg-gray-50 border-b">
                   <th className="p-2 text-left">Sel</th>
                   <th className="p-2 text-left">Pregunta</th>
-                  <th className="p-2 text-left">Area</th>
-                  <th className="p-2 text-left">Comp.</th>
-                  <th className="p-2 text-left">b</th>
+                  <th className="p-2 text-left">Área</th>
+                  <th className="p-2 text-left">Competencia</th>
                 </tr>
               </thead>
               <tbody>
@@ -215,7 +214,6 @@ function SimulacroQuestionPicker({ selectedQuestions, onChange, moduleName }) {
                       <td className="p-2 max-w-lg">{question.statementText || question.statement?.text || question.latex || '(sin texto)'}</td>
                       <td className="p-2">{question.area}</td>
                       <td className="p-2">{question.competencia}</td>
-                      <td className="p-2">{Number(question.triParamB ?? 0).toFixed(2)}</td>
                     </tr>
                   );
                 })}

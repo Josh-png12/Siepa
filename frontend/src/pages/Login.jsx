@@ -237,7 +237,7 @@ function Login() {
           <ul className="relative z-10 space-y-3 text-sm text-sky-50">
             <li className="rounded-xl bg-white/15 px-4 py-3">Resultados consolidados por area y percentil.</li>
             <li className="rounded-xl bg-white/15 px-4 py-3">Simulacros virtuales y fisicos en una linea de tiempo.</li>
-            <li className="rounded-xl bg-white/15 px-4 py-3">Motor TRI para recomendaciones de estudio personalizadas.</li>
+            <li className="rounded-xl bg-white/15 px-4 py-3">Recomendaciones de estudio personalizadas según tu desempeño.</li>
           </ul>
         </aside>
       </div>

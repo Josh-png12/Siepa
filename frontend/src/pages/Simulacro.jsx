@@ -40,7 +40,7 @@ function Simulacro() {
 
   const finalizarSimulacro = () => {
     // Aquí luego enviaremos respuestas al backend para TRI
-    alert("¡Simulacro finalizado! (Próximamente se calculará con TRI)");
+    alert("¡Simulacro finalizado! (Próximamente verás tus resultados aquí)");
     navigate('/dashboard');
   };
 

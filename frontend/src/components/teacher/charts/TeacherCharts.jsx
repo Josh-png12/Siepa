@@ -36,7 +36,7 @@ export function ThetaTrendChart({ trend = [] }) {
         labels,
         datasets: [
           {
-            label: 'Theta promedio',
+            label: 'Nivel académico',
             data: values,
             borderColor: '#0A2E57',
             backgroundColor: 'rgba(10,46,87,0.15)',
@@ -61,7 +61,7 @@ export function CompetencyBreakdownChart({ rows = [] }) {
         labels: rows.map((item) => item.competency),
         datasets: [
           {
-            label: 'Theta',
+            label: 'Nivel académico',
             data: rows.map((item) => Number(item.avgTheta || 0)),
             backgroundColor: '#63B32E'
           }
@@ -84,7 +84,7 @@ export function ComparisonChart({ rows = [] }) {
         labels: rows.map((item) => item.courseName),
         datasets: [
           {
-            label: 'Theta promedio',
+            label: 'Nivel académico',
             data: rows.map((item) => Number(item.avgTheta || 0)),
             backgroundColor: '#0A2E57'
           }

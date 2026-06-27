@@ -22,7 +22,7 @@ const AREAS = [
   { id: 'sociales', label: 'Sociales y Ciudadanas' },
   { id: 'ciencias', label: 'Ciencias Naturales' },
   { id: 'ingles', label: 'Inglés' },
-  { id: 'sin_clasificar', label: 'Sin clasificar' }
+  { id: 'sin_clasificar', label: 'Sin área asignada' }
 ];
 
 const AREA_ID_TO_LABEL = AREAS.reduce((acc, area) => {
@@ -173,10 +173,10 @@ function PdfImport() {
   const validateFiles = () => {
     const errors = [];
     if (!questionsPdf) errors.push('Debe seleccionar el PDF de preguntas.');
-    if (questionsPdf && !isPdfFile(questionsPdf)) errors.push('questionsPdf debe ser un archivo PDF.');
-    if (answersPdf && !isPdfFile(answersPdf)) errors.push('answersPdf debe ser un archivo PDF.');
-    if (questionsPdf && questionsPdf.size > maxUploadMB * 1024 * 1024) errors.push(`questionsPdf supera ${maxUploadMB}MB.`);
-    if (answersPdf && answersPdf.size > maxUploadMB * 1024 * 1024) errors.push(`answersPdf supera ${maxUploadMB}MB.`);
+    if (questionsPdf && !isPdfFile(questionsPdf)) errors.push('El archivo de preguntas debe ser un PDF.');
+    if (answersPdf && !isPdfFile(answersPdf)) errors.push('El archivo de respuestas debe ser un PDF.');
+    if (questionsPdf && questionsPdf.size > maxUploadMB * 1024 * 1024) errors.push(`El PDF de preguntas supera el límite de ${maxUploadMB}MB.`);
+    if (answersPdf && answersPdf.size > maxUploadMB * 1024 * 1024) errors.push(`El PDF de respuestas supera el límite de ${maxUploadMB}MB.`);
     return errors;
   };
 

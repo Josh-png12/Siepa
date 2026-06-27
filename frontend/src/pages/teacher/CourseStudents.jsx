@@ -64,11 +64,11 @@ function CourseStudents() {
             <tr className="bg-gray-50 border-b text-left">
               <th className="p-3">Nombre</th>
               <th className="p-3">Email</th>
-              <th className="p-3">Last login</th>
+              <th className="p-3">Última conexión</th>
               <th className="p-3">Tiempo semanal</th>
               <th className="p-3">Simulacros</th>
-              <th className="p-3">Theta</th>
-              <th className="p-3">Status</th>
+              <th className="p-3">Nivel académico</th>
+              <th className="p-3">Estado</th>
               <th className="p-3">Acciones</th>
             </tr>
           </thead>
@@ -88,7 +88,7 @@ function CourseStudents() {
                   <td className="p-3">{Number(student.latestTheta || 0).toFixed(2)}</td>
                   <td className="p-3">
                     <span className={`px-2 py-1 rounded text-xs ${statusClass[student.status] || 'bg-gray-100 text-gray-700'}`}>
-                      {student.status}
+                      {student.status === 'active' ? 'Activo' : student.status === 'inactive' ? 'Inactivo' : student.status === 'intermittent' ? 'Intermitente' : student.status}
                     </span>
                   </td>
                   <td className="p-3">
@@ -110,18 +110,18 @@ function CourseStudents() {
           <h2 className="text-xl font-semibold text-[#0A2E57]">Detalle de {selectedStudent.student?.name}</h2>
 
           <div className="grid md:grid-cols-3 gap-3 text-sm">
-            <div><span className="font-semibold">Theta promedio:</span> {Number(selectedStudent.student?.averageTheta || 0).toFixed(2)}</div>
-            <div><span className="font-semibold">Theta latest:</span> {Number(selectedStudent.student?.latestTheta || 0).toFixed(2)}</div>
+            <div><span className="font-semibold">Nivel académico promedio:</span> {Number(selectedStudent.student?.averageTheta || 0).toFixed(2)}</div>
+            <div><span className="font-semibold">Nivel actual:</span> {Number(selectedStudent.student?.latestTheta || 0).toFixed(2)}</div>
             <div><span className="font-semibold">Horas semanales:</span> {Number(selectedStudent.student?.weeklyActiveHours || 0).toFixed(2)}</div>
           </div>
 
           <div>
-            <h3 className="font-semibold mb-2">Login history / actividad reciente</h3>
+            <h3 className="font-semibold mb-2">Historial de actividad reciente</h3>
             {selectedStudent.loginHistory?.length ? (
               <div className="space-y-2">
                 {selectedStudent.loginHistory.map((row, idx) => (
                   <div key={`${row.openedAt}-${idx}`} className="text-sm border rounded p-2">
-                    <p>{new Date(row.openedAt).toLocaleString()} | {row.materialTitle || 'Material'} | {row.downloaded ? 'download' : 'open'} | {row.timeSpent || 0}s</p>
+                    <p>{new Date(row.openedAt).toLocaleString()} | {row.materialTitle || 'Material'} | {row.downloaded ? 'descargó' : 'abrió'} | {row.timeSpent || 0}s</p>
                   </div>
                 ))}
               </div>

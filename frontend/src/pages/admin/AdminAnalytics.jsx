@@ -85,7 +85,7 @@ function AdminAnalytics() {
                   {(analytics?.metrics?.crossCourseComparison || []).map((row) => (
                     <div key={row.courseId} className="rounded-lg bg-slate-50 p-2 text-sm">
                       <p className="font-medium text-slate-800">{row.courseId}</p>
-                      <p className="text-slate-600">Theta: {Number(row.avgTheta || 0).toFixed(2)} | Riesgo: {row.riskStudents}</p>
+                      <p className="text-slate-600">Nivel académico: {Number(row.avgTheta || 0).toFixed(2)} | Riesgo: {row.riskStudents}</p>
                     </div>
                   ))}
                 </div>
@@ -103,7 +103,7 @@ function AdminAnalytics() {
                   {topTeachers.map((row) => (
                     <div key={row.teacherId} className="rounded-lg bg-slate-50 p-2 text-sm">
                       <p className="font-medium text-slate-800">{row.teacherId}</p>
-                      <p className="text-slate-600">Theta promedio: {Number(row.avgTheta || 0).toFixed(2)} | Riesgo total: {row.atRiskStudents}</p>
+                      <p className="text-slate-600">Nivel académico promedio: {Number(row.avgTheta || 0).toFixed(2)} | Riesgo total: {row.atRiskStudents}</p>
                     </div>
                   ))}
                 </div>

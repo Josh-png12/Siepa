@@ -70,8 +70,8 @@ function TeacherDashboard() {
 
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-[#0A2E57]">Teacher Pro Dashboard</h1>
-          <p className="text-slate-500">Analitica unificada + inteligencia pedagógica.</p>
+          <h1 className="text-3xl font-bold text-[#0A2E57]">Panel del Docente</h1>
+          <p className="text-slate-500">Analítica unificada + inteligencia pedagógica.</p>
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge label={`Proyeccion Saber 11: ${insights?.summary?.projectedSaber11Score || 0}`} tone="info" />
@@ -85,13 +85,13 @@ function TeacherDashboard() {
       <section className="grid md:grid-cols-4 gap-5">
         <StatsCard title="Cursos" value={dashboard?.totalCourses || 0} color="text-[#0A2E57]" />
         <StatsCard title="Estudiantes" value={dashboard?.totalStudents || 0} color="text-[#63B32E]" />
-        <StatsCard title="Theta Promedio" value={Number(dashboard?.averageTheta || 0).toFixed(2)} color="text-[#F28C28]" />
+        <StatsCard title="Nivel académico" value={Number(dashboard?.averageTheta || 0).toFixed(2)} color="text-[#F28C28]" />
         <StatsCard title="Simulacros" value={dashboard?.simulacrosAplicados || 0} color="text-[#0A2E57]" />
       </section>
 
       <section className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-2xl shadow p-5">
-          <h2 className="text-lg font-semibold text-[#0A2E57] mb-3">Tendencia de theta global</h2>
+          <h2 className="text-lg font-semibold text-[#0A2E57] mb-3">Tendencia del nivel académico</h2>
           <div className="h-72">
             <Suspense fallback={<LoadingSkeleton className="h-full" />}>
               <LazyCharts variant="thetaTrend" trend={trendRows} />
@@ -100,7 +100,7 @@ function TeacherDashboard() {
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 space-y-3">
-          <h2 className="text-lg font-semibold text-[#0A2E57]">Smart Insights</h2>
+          <h2 className="text-lg font-semibold text-[#0A2E57]">Análisis y recomendaciones</h2>
           <div className="space-y-2">
             {(insights?.insights?.recommendedCompetencies || []).map((item) => (
               <StatusBadge key={item} label={`Reforzar: ${item}`} tone="warning" />
@@ -130,7 +130,7 @@ function TeacherDashboard() {
                 <div key={course.courseId} className="flex items-center justify-between p-3 rounded-xl bg-slate-50">
                   <div>
                     <p className="font-semibold text-slate-800">{course.courseName}</p>
-                    <p className="text-xs text-slate-500">Theta {Number(course.averageTheta || 0).toFixed(2)}</p>
+                    <p className="text-xs text-slate-500">Nivel {Number(course.averageTheta || 0).toFixed(2)}</p>
                   </div>
                   <StatusBadge label={`${course.atRiskStudents} en riesgo`} tone={course.atRiskStudents > 0 ? 'danger' : 'ok'} />
                 </div>

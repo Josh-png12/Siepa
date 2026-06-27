@@ -7,7 +7,7 @@ function CourseTable({ courses }) {
           <th className="pb-4">Grupo</th>
           <th className="pb-4">Nivel</th>
           <th className="pb-4">Estudiantes</th>
-          <th className="pb-4">θ Promedio</th>
+          <th className="pb-4">Nivel académico</th>
           <th className="pb-4">Estado</th>
           <th className="pb-4">Acciones</th>
         </tr>

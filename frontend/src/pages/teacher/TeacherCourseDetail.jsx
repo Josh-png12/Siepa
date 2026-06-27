@@ -44,7 +44,7 @@ function TeacherCourseDetail() {
           <thead>
             <tr className="text-left border-b">
               <th className="pb-4">Estudiante</th>
-              <th className="pb-4">θ Actual</th>
+              <th className="pb-4">Nivel académico</th>
               <th className="pb-4">Percentil</th>
               <th className="pb-4">Último Simulacro</th>
               <th className="pb-4">Riesgo</th>

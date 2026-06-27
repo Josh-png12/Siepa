@@ -118,7 +118,7 @@ function SimulacroDetail() {
       <section className="bg-white rounded-2xl shadow p-6 grid md:grid-cols-4 gap-4">
         <div><span className="font-semibold">Estado:</span> {simulacro.estado}</div>
         <div><span className="font-semibold">Tiempo global:</span> {simulacro.globalTimeLimit || '-'} min</div>
-        <div><span className="font-semibold">Strict mode:</span> {simulacro.strictMode ? 'si' : 'no'}</div>
+        <div><span className="font-semibold">Modo examen:</span> {simulacro.strictMode ? 'Sí' : 'No'}</div>
         <div><span className="font-semibold">Preguntas:</span> {countQuestions(simulacro.modules)}</div>
       </section>
 
@@ -142,8 +142,8 @@ function SimulacroDetail() {
 
               {editable ? (
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => moveQuestion(moduleItem.name, index, -1)} className="px-2 py-1 bg-gray-200 rounded">Up</button>
-                  <button type="button" onClick={() => moveQuestion(moduleItem.name, index, 1)} className="px-2 py-1 bg-gray-200 rounded">Down</button>
+                  <button type="button" onClick={() => moveQuestion(moduleItem.name, index, -1)} className="px-2 py-1 bg-gray-200 rounded">Subir</button>
+                  <button type="button" onClick={() => moveQuestion(moduleItem.name, index, 1)} className="px-2 py-1 bg-gray-200 rounded">Bajar</button>
                 </div>
               ) : null}
             </div>

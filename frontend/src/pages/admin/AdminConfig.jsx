@@ -89,31 +89,31 @@ function AdminConfig() {
 
       <div className={`${adminTokens.classes.card} p-4 space-y-3`}>
         <label className="block text-sm">
-          maxUploadMB
+          Tamaño máximo de archivo (MB)
           <input type="number" className={`mt-1 w-full ${adminTokens.classes.input}`} value={form.maxUploadMB} onChange={(e) => setForm((prev) => ({ ...prev, maxUploadMB: Number(e.target.value) }))} />
         </label>
         <label className="block text-sm">
-          ocrReviewWindowDays
+          Días de revisión OCR
           <input type="number" className={`mt-1 w-full ${adminTokens.classes.input}`} value={form.ocrReviewWindowDays} onChange={(e) => setForm((prev) => ({ ...prev, ocrReviewWindowDays: Number(e.target.value) }))} />
         </label>
         <label className="block text-sm">
-          fileRetentionDays
+          Días de retención de archivos
           <input type="number" className={`mt-1 w-full ${adminTokens.classes.input}`} value={form.fileRetentionDays} onChange={(e) => setForm((prev) => ({ ...prev, fileRetentionDays: Number(e.target.value) }))} />
         </label>
 
         <div className="space-y-2">
           <Toggle
-            label="physicalSimulacrosGlobal"
+            label="Simulacros físicos (global)"
             value={form.featuresEnabled?.physicalSimulacrosGlobal}
             onChange={(value) => setForm((prev) => ({ ...prev, featuresEnabled: { ...prev.featuresEnabled, physicalSimulacrosGlobal: value } }))}
           />
           <Toggle
-            label="ocrGlobal"
+            label="Lectura automática (global)"
             value={form.featuresEnabled?.ocrGlobal}
             onChange={(value) => setForm((prev) => ({ ...prev, featuresEnabled: { ...prev.featuresEnabled, ocrGlobal: value } }))}
           />
           <Toggle
-            label="questionModeration"
+            label="Moderación de preguntas"
             value={form.featuresEnabled?.questionModeration}
             onChange={(value) => setForm((prev) => ({ ...prev, featuresEnabled: { ...prev.featuresEnabled, questionModeration: value } }))}
           />

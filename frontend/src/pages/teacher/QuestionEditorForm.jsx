@@ -62,9 +62,9 @@ const validate = (state) => {
   const triB = Number(state.triB);
   const triC = Number(state.triC);
 
-  if (Number.isNaN(triA) || triA <= 0 || triA > 3) return 'TRI a debe estar entre 0.01 y 3.';
-  if (Number.isNaN(triB) || triB < -3 || triB > 3) return 'TRI b debe estar entre -3 y 3.';
-  if (Number.isNaN(triC) || triC < 0 || triC > 0.5) return 'TRI c debe estar entre 0 y 0.5.';
+  if (Number.isNaN(triA) || triA <= 0 || triA > 3) return 'Discriminación (a) debe estar entre 0.01 y 3.';
+  if (Number.isNaN(triB) || triB < -3 || triB > 3) return 'Dificultad (b) debe estar entre -3 y 3.';
+  if (Number.isNaN(triC) || triC < 0 || triC > 0.5) return 'Probabilidad de acierto (c) debe estar entre 0 y 0.5.';
 
   return '';
 };
@@ -380,7 +380,7 @@ function QuestionEditorForm({
       <details className="border border-slate-200 rounded-xl overflow-hidden">
         <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-slate-500 bg-slate-50 hover:bg-slate-100 select-none list-none flex items-center gap-2">
           <span className="text-xs">▸</span>
-          Configuración avanzada — LaTeX, parámetros TRI, visibilidad
+          Configuración avanzada — LaTeX, parámetros de calibración, visibilidad
         </summary>
 
         <div className="p-4 space-y-5">
@@ -410,10 +410,10 @@ function QuestionEditorForm({
             </select>
           </div>
 
-          {/* Parámetros TRI */}
+          {/* Parámetros de calibración */}
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">
-              Parámetros TRI{' '}
+              Parámetros de calibración{' '}
               <span className="text-xs font-normal text-slate-400">(se calibran automáticamente con uso real)</span>
             </p>
             <div className="grid grid-cols-3 gap-3">
@@ -445,9 +445,9 @@ function QuestionEditorForm({
                 onChange={(e) => setField('visibility', e.target.value)}
                 className="w-full border rounded-lg px-3 py-2 text-sm"
               >
-                <option value="private">private</option>
-                <option value="institutional">institutional</option>
-                <option value="national">national</option>
+                <option value="private">Privada</option>
+                <option value="institutional">Institucional</option>
+                <option value="national">Nacional</option>
               </select>
             </div>
             <div>
@@ -457,8 +457,8 @@ function QuestionEditorForm({
                 onChange={(e) => setField('calibrationStatus', e.target.value)}
                 className="w-full border rounded-lg px-3 py-2 text-sm"
               >
-                <option value="experimental">experimental</option>
-                <option value="calibrated">calibrated</option>
+                <option value="experimental">Experimental</option>
+                <option value="calibrated">Calibrada</option>
               </select>
             </div>
           </div>
