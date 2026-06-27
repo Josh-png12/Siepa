@@ -74,21 +74,7 @@ app.use(cors({
 
 // ======================= SECURITY MIDDLEWARES =======================
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:"],
-      connectSrc: ["'self'", process.env.CORS_ORIGIN || "'none'"],
-      frameSrc: ["'none'"],
-      objectSrc: ["'none'"],
-      upgradeInsecureRequests: [],
-    },
-  },
-  crossOriginEmbedderPolicy: false, // Allow loading images from uploads
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin resource sharing for uploads
+  contentSecurityPolicy: false
 }));
 
 app.use(express.json({ limit: '50mb' }));
