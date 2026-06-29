@@ -15,6 +15,7 @@ const {
 } = require('../validators/physicalSimulacroValidators');
 const { generateQRToken } = require('../utils/qrToken');
 const { generateStudentDocuments } = require('./pdfGeneratorService');
+const { transitionStatus, RESULT_STATUS_CONFIDENCE_THRESHOLD } = require('./simulacroStatusService');
 
 const FILE_RETENTION_DAYS = Number(process.env.FILE_RETENTION_DAYS || 14);
 
@@ -405,7 +406,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
     const evaluated = evaluateAnswerSheet({ sheet: page, answerKey: simulacro.answerKey, thetaCalculator });
     const modelStatus = page.flags?.includes('LOW_CONFIDENCE') ? 'needsReview' : evaluated.status;
 
-    await prisma.physicalAnswerSheet.create({
+    const createdSheet = await prisma.physicalAnswerSheet.create({
       data: {
         physicalSimulacroId: simulacro.id,
         studentId: extractedStudentUserId,
@@ -422,6 +423,21 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
         detectionConfidence: page.detectionConfidence,
         processedAt: new Date()
       }
+    });
+
+    // Transition result visibility status based on detection confidence
+    const conf = Number(page.detectionConfidence || 0);
+    const resultTarget = conf < RESULT_STATUS_CONFIDENCE_THRESHOLD ? 'REVIEW_REQUIRED' : 'PROCESSED';
+    const reviewReason = resultTarget === 'REVIEW_REQUIRED'
+      ? `Confianza de detección ${conf.toFixed(2)} < ${RESULT_STATUS_CONFIDENCE_THRESHOLD}`
+      : null;
+
+    await transitionStatus({
+      sheetId: createdSheet.id,
+      tenantId: simulacro.schoolId,
+      toStatus: resultTarget,
+      changedBy: 'system',
+      reason: reviewReason
     });
   }
 

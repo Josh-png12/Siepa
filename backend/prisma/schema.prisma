@@ -108,6 +108,15 @@ enum PhysicalSheetStatus {
   rejected
 }
 
+// Visibility state of a student's physical simulacro result (independent of OCR quality status).
+// PENDING → PROCESSED or REVIEW_REQUIRED → RELEASED. RELEASED is immutable.
+enum ResultStatus {
+  PENDING
+  PROCESSED
+  RELEASED
+  REVIEW_REQUIRED
+}
+
 enum QRAuditAction {
   GENERATED
   VERIFIED_OK
@@ -180,6 +189,7 @@ model School {
   metrics            InstitutionMetrics[]
   systemConfig       SystemConfig?
   qrAuditLogs        QRAuditLog[]
+  simulacroStatusLogs SimulacroStatusLog[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -748,6 +758,10 @@ model PhysicalAnswerSheet {
   score               Float?
   theta               Float?
   status              PhysicalAnswerSheetStatus @default(needsReview)
+  resultStatus        ResultStatus              @default(PENDING)
+  releasedAt          DateTime?
+  releasedBy          String?
+  reviewNote          String?
   errors              Json? // Array<{ type: string, message: string }>
   manualCorrections   Json? // Array<{ questionNumber: number, correctedOption: string }>
   detectionConfidence Float?
@@ -759,6 +773,7 @@ model PhysicalAnswerSheet {
   @@index([physicalSimulacroId])
   @@index([studentId])
   @@index([status])
+  @@index([physicalSimulacroId, resultStatus])
 }
 
 // Pre-generated QR token record created when PDFs are printed for a physical simulacro.
@@ -796,6 +811,24 @@ model QRAuditLog {
 
   @@index([schoolId, simulacroId, createdAt(sort: Desc)])
   @@index([qrTokenHash])
+}
+
+// Immutable audit log for PhysicalAnswerSheet result status transitions.
+// Rows are NEVER updated or deleted — only INSERTs are allowed.
+model SimulacroStatusLog {
+  id          String       @id @default(cuid())
+  tenantId    String
+  school      School       @relation(fields: [tenantId], references: [id])
+  simulacroId String
+  studentId   String
+  fromStatus  ResultStatus?
+  toStatus    ResultStatus
+  changedBy   String
+  reason      String?
+  createdAt   DateTime     @default(now())
+
+  @@index([tenantId, simulacroId, createdAt(sort: Desc)])
+  @@index([simulacroId, studentId])
 }
 
 // OCR answer sheet for the physical-upload flow of a virtual Simulacro
