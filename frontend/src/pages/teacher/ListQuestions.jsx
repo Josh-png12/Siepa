@@ -27,7 +27,7 @@ function ListQuestions() {
         Object.entries(activeFilters).filter(([, value]) => value !== '')
       );
       const response = await listQuestions(params);
-      setQuestions(response.questions || []);
+      setQuestions(response.items || []);
     } catch (err) {
       setError(err.response?.data?.message || 'No se pudieron cargar las preguntas');
     } finally {
@@ -54,7 +54,7 @@ function ListQuestions() {
     try {
       setActionLoadingId(id);
       await deleteQuestion(id);
-      setQuestions((prev) => prev.filter((question) => question._id !== id));
+      setQuestions((prev) => prev.filter((question) => question.id !== id));
     } catch (err) {
       setError(err.response?.data?.message || 'No se pudo eliminar la pregunta');
     } finally {
@@ -67,7 +67,7 @@ function ListQuestions() {
       setActionLoadingId(id);
       const response = await publishQuestion(id);
       setQuestions((prev) =>
-        prev.map((question) => (question._id === id ? response.question : question))
+        prev.map((question) => (question.id === id ? response.question : question))
       );
     } catch (err) {
       setError(err.response?.data?.message || 'No se pudo publicar la pregunta');
@@ -126,21 +126,21 @@ function ListQuestions() {
                 </tr>
               ) : (
                 questions.map((question) => {
-                  const inAction = actionLoadingId === question._id;
+                  const inAction = actionLoadingId === question.id;
                   return (
-                    <tr key={question._id} className="border-b">
+                    <tr key={question.id} className="border-b">
                       <td className="p-4 max-w-lg">
-                        <p className="line-clamp-2">{question.statement}</p>
+                        <p className="line-clamp-2">{question.statementText}</p>
                       </td>
                       <td className="p-4">{question.area}</td>
                       <td className="p-4">{question.competencia}</td>
                       <td className="p-4">{question.dificultadCualitativa}</td>
                       <td className="p-4">{question.estado}</td>
-                      <td className="p-4">{question.visibilidad}</td>
+                      <td className="p-4">{question.visibility}</td>
                       <td className="p-4">
                         <div className="flex flex-wrap gap-2">
                           <button
-                            onClick={() => navigate(`/dashboard/docente/preguntas/${question._id}/editar`)}
+                            onClick={() => navigate(`/dashboard/docente/preguntas/${question.id}/editar`)}
                             className="bg-blue-600 text-white px-3 py-1 rounded"
                             disabled={inAction}
                           >
@@ -148,7 +148,7 @@ function ListQuestions() {
                           </button>
                           {question.estado !== 'publicada' ? (
                             <button
-                              onClick={() => handlePublish(question._id)}
+                              onClick={() => handlePublish(question.id)}
                               className="bg-emerald-600 text-white px-3 py-1 rounded"
                               disabled={inAction}
                             >
@@ -156,7 +156,7 @@ function ListQuestions() {
                             </button>
                           ) : null}
                           <button
-                            onClick={() => handleDelete(question._id)}
+                            onClick={() => handleDelete(question.id)}
                             className="bg-red-600 text-white px-3 py-1 rounded"
                             disabled={inAction}
                           >

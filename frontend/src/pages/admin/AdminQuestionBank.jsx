@@ -150,8 +150,8 @@ function AdminQuestionBank() {
               </thead>
               <tbody>
                 {data.items.map((item) => (
-                  <tr key={item._id} className="border-t">
-                    <td className="p-3">{item.statement?.text || '-'}</td>
+                  <tr key={item.id} className="border-t">
+                    <td className="p-3">{item.statementText || '-'}</td>
                     <td className="p-3">{item.area || '-'}</td>
                     <td className="p-3">{item.competencia || '-'}</td>
                     <td className="p-3">
@@ -159,12 +159,12 @@ function AdminQuestionBank() {
                         {item.estado || 'borrador'}
                       </span>
                     </td>
-                    <td className="p-3">{item.metadata?.createdBy?.name || item.metadata?.createdBy?.email || 'N/A'}</td>
+                    <td className="p-3">{item.createdBy?.name || item.createdBy?.email || 'N/A'}</td>
                     <td className="p-3 space-x-2">
-                      <button type="button" onClick={() => moderate(item._id, 'approve')} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
+                      <button type="button" onClick={() => moderate(item.id, 'approve')} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
                         Aprobar
                       </button>
-                      <button type="button" onClick={() => moderate(item._id, 'reject')} className="rounded bg-amber-600 px-2 py-1 text-xs text-white">
+                      <button type="button" onClick={() => moderate(item.id, 'reject')} className="rounded bg-amber-600 px-2 py-1 text-xs text-white">
                         Rechazar
                       </button>
                     </td>

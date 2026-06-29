@@ -291,11 +291,11 @@ function QuestionsList() {
               </tr>
             ) : (
               questions.map((question) => {
-                const busy = actionId === question._id;
+                const busy = actionId === question.id;
                 return (
-                  <tr key={question._id} className="border-b">
+                  <tr key={question.id} className="border-b">
                     <td className="p-4 max-w-md">
-                      <p className="line-clamp-2">{question.statement?.text || question.latex || '(sin texto)'}</p>
+                      <p className="line-clamp-2">{question.statementText || question.latex || '(sin texto)'}</p>
                     </td>
                     <td className="p-4">{question.area}</td>
                     <td className="p-4">{question.competencia}</td>
@@ -306,7 +306,7 @@ function QuestionsList() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => navigate(`/dashboard/docente/preguntas/${question._id}/editar`)}
+                          onClick={() => navigate(`/dashboard/docente/preguntas/${question.id}/editar`)}
                           className="bg-blue-600 text-white px-3 py-1 rounded"
                           disabled={busy}
                         >
@@ -315,7 +315,7 @@ function QuestionsList() {
                         {question.estado !== 'publicada' ? (
                           <button
                             type="button"
-                            onClick={() => onPublish(question._id)}
+                            onClick={() => onPublish(question.id)}
                             className="bg-emerald-600 text-white px-3 py-1 rounded"
                             disabled={busy}
                           >
@@ -324,7 +324,7 @@ function QuestionsList() {
                         ) : null}
                         <button
                           type="button"
-                          onClick={() => onDelete(question._id)}
+                          onClick={() => onDelete(question.id)}
                           className="bg-red-600 text-white px-3 py-1 rounded"
                           disabled={busy}
                         >

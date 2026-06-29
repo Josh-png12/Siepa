@@ -363,10 +363,10 @@ export const updateAdminSystemConfig = (payload) =>
   api.put('/admin/system-config', payload).then((res) => res.data);
 
 export const adminGetGovernanceOCR = (params = {}) =>
-  api.get('/admin/governance-ocr', { params: cleanParams(params) }).then((res) => res.data);
+  api.get('/admin/governance/ocr', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminGetInstitutionAnalytics = (params = {}) =>
-  api.get('/admin/institution-analytics', { params: cleanParams(params) }).then((res) => res.data);
+  api.get('/admin/analytics/institution', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminGetAuditLogs = (params = {}) =>
   api.get('/admin/audit-logs', { params: cleanParams(params) }).then((res) => res.data);

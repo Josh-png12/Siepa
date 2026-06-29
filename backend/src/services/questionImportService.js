@@ -109,7 +109,11 @@ const importQuestionsFromSpreadsheet = async ({ filePath, userId, mapping = {}, 
 
   rows.forEach((row, index) => {
     try {
-      const normalized = normalizeQuestionPayload(normalizeRow(row, mergedMapping));
+      const rowData = normalizeRow(row, mergedMapping);
+      if (!rowData.statement.text) {
+        throw buildError('statementText es requerido y no puede estar vacio');
+      }
+      const normalized = normalizeQuestionPayload(rowData);
       validateQuestionPayload(normalized);
       normalizedRows.push(normalized);
     } catch (error) {

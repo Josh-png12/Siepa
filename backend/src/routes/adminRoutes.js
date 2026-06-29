@@ -186,6 +186,14 @@ router.get('/governance/ocr', validateQuery({
 router.get('/analytics/institution', heavyAdminRateLimit, validateQuery({
   refresh: { type: 'string', enum: ['true', 'false'] }
 }), adminController.getInstitutionMetrics);
+
+// Alias routes — frontend builds that still use the hyphenated form
+router.get('/governance-ocr', validateQuery({
+  refresh: { type: 'string', enum: ['true', 'false'] }
+}), adminController.getGovernanceStats);
+router.get('/institution-analytics', heavyAdminRateLimit, validateQuery({
+  refresh: { type: 'string', enum: ['true', 'false'] }
+}), adminController.getInstitutionMetrics);
 router.get('/audit', heavyAdminRateLimit, validateQuery({
   ...paginationQuerySchema,
   userId: { type: 'objectId' },
