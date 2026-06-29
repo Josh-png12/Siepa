@@ -108,6 +108,13 @@ enum PhysicalSheetStatus {
   rejected
 }
 
+enum QRAuditAction {
+  GENERATED
+  VERIFIED_OK
+  VERIFIED_FAIL
+  EXPIRED
+}
+
 enum EvaluationType {
   virtual
   physical
@@ -172,6 +179,7 @@ model School {
   auditLogs          AuditLog[]
   metrics            InstitutionMetrics[]
   systemConfig       SystemConfig?
+  qrAuditLogs        QRAuditLog[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +257,7 @@ model User {
   pdfImportJobs     PdfImportJob[]
   pdfImportBatches  PdfImportBatch[]
   auditLogs         AuditLog[]
+  physicalIssuances PhysicalStudentIssuance[] @relation("PhysicalIssuanceStudent")
 
   @@unique([email, schoolId])
   @@index([schoolId, role, status])
@@ -698,9 +707,10 @@ model PhysicalSimulacro {
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
-  courses      Course[]              // implicit M:N (Prisma auto join table)
+  courses      Course[]                  // implicit M:N (Prisma auto join table)
   answerKey    PhysicalAnswerKey[]
   answerSheets PhysicalAnswerSheet[]
+  issuances    PhysicalStudentIssuance[]
   evaluations  Evaluation[]
 
   @@index([schoolId, teacherId, status])
@@ -749,6 +759,43 @@ model PhysicalAnswerSheet {
   @@index([physicalSimulacroId])
   @@index([studentId])
   @@index([status])
+}
+
+// Pre-generated QR token record created when PDFs are printed for a physical simulacro.
+// Created at PDF generation time; the matching PhysicalAnswerSheet is created after scanning.
+model PhysicalStudentIssuance {
+  id                  String            @id @default(cuid())
+  physicalSimulacroId String
+  physicalSimulacro   PhysicalSimulacro @relation(fields: [physicalSimulacroId], references: [id], onDelete: Cascade)
+  studentId           String
+  student             User              @relation("PhysicalIssuanceStudent", fields: [studentId], references: [id])
+  qrToken             String            @unique
+  qrGeneratedAt       DateTime          @default(now())
+  expiresAt           DateTime
+  pdfHash             String?
+  pdfTemplateVersion  String            @default("v1")
+
+  @@unique([physicalSimulacroId, studentId])
+  @@index([physicalSimulacroId])
+  @@index([qrToken])
+}
+
+// Audit trail for QR token lifecycle: generation, verification success/failure.
+// Never stores the raw qrToken — only its SHA-256 hash.
+model QRAuditLog {
+  id          String        @id @default(cuid())
+  schoolId    String
+  school      School        @relation(fields: [schoolId], references: [id])
+  simulacroId String?
+  studentId   String?
+  qrTokenHash String
+  action      QRAuditAction
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime      @default(now())
+
+  @@index([schoolId, simulacroId, createdAt(sort: Desc)])
+  @@index([qrTokenHash])
 }
 
 // OCR answer sheet for the physical-upload flow of a virtual Simulacro

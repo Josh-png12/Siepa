@@ -1,5 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const ApiError = require('../utils/ApiError');
@@ -12,6 +13,8 @@ const {
   validateCreatePhysicalSimulacroPayload,
   validateReviewPayload
 } = require('../validators/physicalSimulacroValidators');
+const { generateQRToken } = require('../utils/qrToken');
+const { generateStudentDocuments } = require('./pdfGeneratorService');
 
 const FILE_RETENTION_DAYS = Number(process.env.FILE_RETENTION_DAYS || 14);
 
@@ -675,6 +678,161 @@ const archiveTeacherOcrSimulacro = async ({ user, simulacroId }) => {
   return { archivedAt: new Date(), deletedFiles, retentionDays: FILE_RETENTION_DAYS };
 };
 
+const generateSimulacroSheets = async ({ simulacroId, user, ip, userAgent }) => {
+  const whereClause = {
+    id: simulacroId,
+    schoolId: user.schoolId,
+    ...(user.role !== 'admin' ? { teacherId: user.id } : {})
+  };
+
+  const simulacro = await prisma.physicalSimulacro.findFirst({
+    where: whereClause,
+    include: {
+      courses: {
+        include: {
+          enrollments: {
+            include: {
+              student: {
+                include: { user: { select: { id: true, name: true } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!simulacro) throw new ApiError(404, 'NotFound', ['Simulacro no encontrado o sin acceso']);
+
+  if (!['draft', 'answerKeyPending', 'readyForUpload'].includes(simulacro.status)) {
+    throw new ApiError(400, 'ValidationError', [`No se pueden generar PDFs con estado: ${simulacro.status}`]);
+  }
+
+  // De-duplicate students across courses (a student may be enrolled in multiple courses)
+  const studentMap = new Map();
+  for (const course of simulacro.courses) {
+    for (const enrollment of course.enrollments) {
+      const userId = enrollment.student.userId;
+      if (!studentMap.has(userId)) {
+        studentMap.set(userId, {
+          studentId: userId,
+          studentName: enrollment.student.user.name,
+          studentDocument: enrollment.student.identificationNumber || '',
+          courseName: course.name
+        });
+      }
+    }
+  }
+
+  if (!studentMap.size) {
+    throw new ApiError(400, 'ValidationError', ['No hay estudiantes matriculados en este simulacro']);
+  }
+
+  const studentsForPdf = [];
+  const issuanceMeta = [];
+
+  for (const [, studentData] of studentMap) {
+    const qrToken = generateQRToken({
+      studentId: studentData.studentId,
+      simulacroId: simulacro.id,
+      tenantId: simulacro.schoolId
+    });
+    const expiresAt = new Date(Date.now() + 48 * 3600 * 1000);
+
+    studentsForPdf.push({ ...studentData, qrPayload: qrToken });
+    issuanceMeta.push({ ...studentData, qrToken, expiresAt });
+  }
+
+  const simulacroForPdf = {
+    simulacroPhysicalId: simulacro.id,
+    questionCount: simulacro.totalQuestions,
+    date: simulacro.date
+  };
+
+  const { studentPackages } = await generateStudentDocuments({
+    simulacro: simulacroForPdf,
+    students: studentsForPdf,
+    questions: []
+  });
+
+  const results = [];
+
+  for (let i = 0; i < issuanceMeta.length; i++) {
+    const meta = issuanceMeta[i];
+    const pkg = studentPackages[i];
+
+    let pdfHash = null;
+    try {
+      const omrAbsPath = path.join(process.cwd(), pkg.omrPdfPath.replace(/^\//, ''));
+      const omrBuffer = await fs.readFile(omrAbsPath);
+      pdfHash = crypto.createHash('sha256').update(omrBuffer).digest('hex');
+    } catch (_err) {
+      // non-fatal
+    }
+
+    const qrTokenHash = crypto.createHash('sha256').update(meta.qrToken).digest('hex');
+
+    await prisma.physicalStudentIssuance.upsert({
+      where: {
+        physicalSimulacroId_studentId: {
+          physicalSimulacroId: simulacro.id,
+          studentId: meta.studentId
+        }
+      },
+      create: {
+        physicalSimulacroId: simulacro.id,
+        studentId: meta.studentId,
+        qrToken: meta.qrToken,
+        expiresAt: meta.expiresAt,
+        pdfHash,
+        pdfTemplateVersion: 'v1'
+      },
+      update: {
+        qrToken: meta.qrToken,
+        qrGeneratedAt: new Date(),
+        expiresAt: meta.expiresAt,
+        pdfHash,
+        pdfTemplateVersion: 'v1'
+      }
+    });
+
+    await prisma.qRAuditLog.create({
+      data: {
+        schoolId: simulacro.schoolId,
+        simulacroId: simulacro.id,
+        studentId: meta.studentId,
+        qrTokenHash,
+        action: 'GENERATED',
+        ip: ip || null,
+        userAgent: userAgent || null
+      }
+    });
+
+    results.push({ ...pkg, pdfHash });
+  }
+
+  await logAudit({
+    schoolId: simulacro.schoolId,
+    userId: user.id,
+    action: 'generate_pdfs',
+    entityType: 'PhysicalSimulacro',
+    entityId: simulacro.id,
+    metadata: { totalStudents: results.length }
+  });
+
+  return {
+    simulacroId: simulacro.id,
+    totalStudents: results.length,
+    studentPackages: results.map((pkg) => ({
+      studentId: pkg.studentId,
+      studentName: pkg.studentName,
+      examPdfPath: pkg.examPdfPath,
+      omrPdfPath: pkg.omrPdfPath,
+      pdfHash: pkg.pdfHash
+    }))
+  };
+};
+
 module.exports = {
   createAdminPhysicalSimulacro,
   listTeacherOcrSimulacros,
@@ -682,5 +840,6 @@ module.exports = {
   uploadTeacherOcrSheets,
   reviewTeacherOcrSheet,
   publishTeacherOcrResults,
-  archiveTeacherOcrSimulacro
+  archiveTeacherOcrSimulacro,
+  generateSimulacroSheets
 };

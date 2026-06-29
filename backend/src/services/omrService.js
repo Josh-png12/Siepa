@@ -29,6 +29,24 @@ const omrDebug = (...args) => {
 const parseQrPayload = (payload) => {
   if (!payload) return null;
 
+  // Try HMAC-signed token format first (base64url_payload.base64url_sig)
+  if (typeof payload === 'string' && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(payload)) {
+    try {
+      const { verifyQRToken } = require('../utils/qrToken');
+      const result = verifyQRToken(payload);
+      return { studentId: result.studentId, simulacroId: result.simulacroId, _verified: true };
+    } catch (err) {
+      if (err.message === 'TOKEN_EXPIRED') {
+        return { _error: 'TOKEN_EXPIRED' };
+      }
+      if (err.message === 'INVALID_SIGNATURE') {
+        return { _error: 'INVALID_SIGNATURE' };
+      }
+      // Fall through to legacy JSON parse
+    }
+  }
+
+  // Legacy JSON format fallback (supports old plain-JSON QR tokens)
   try {
     const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
     if (!parsed.studentId && parsed.studentID) parsed.studentId = parsed.studentID;

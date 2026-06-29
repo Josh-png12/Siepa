@@ -1,7 +1,10 @@
+const crypto = require('crypto');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const { successResponse } = require('../utils/response');
 const service = require('../services/physicalSimulacroService');
+const prisma = require('../config/prisma');
+const { verifyQRToken } = require('../utils/qrToken');
 const { validateUploadPayload } = require('../validators/ocrValidators');
 
 const parsePagePayloads = (payloadRaw) => {
@@ -138,6 +141,107 @@ const verifyBubble = asyncHandler(async (req, res) => {
   });
 });
 
+const verifyQR = asyncHandler(async (req, res) => {
+  const { qrToken, simulacroId } = req.body || {};
+
+  if (!qrToken || !simulacroId) {
+    throw new ApiError(400, 'ValidationError', ['Se requieren qrToken y simulacroId']);
+  }
+
+  const serviceKey = req.headers['x-omr-service-key'];
+  if (!serviceKey || serviceKey !== process.env.OMR_SERVICE_SECRET) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const qrTokenHash = crypto.createHash('sha256').update(String(qrToken)).digest('hex');
+  const ip = req.ip || null;
+  const userAgent = req.get('user-agent') || null;
+
+  let payload;
+  try {
+    payload = verifyQRToken(String(qrToken));
+  } catch (err) {
+    const action = err.message === 'TOKEN_EXPIRED' ? 'EXPIRED' : 'VERIFIED_FAIL';
+
+    // Log failure without exposing reason to caller
+    try {
+      const simulacro = await prisma.physicalSimulacro.findUnique({
+        where: { id: simulacroId },
+        select: { schoolId: true }
+      });
+      if (simulacro) {
+        await prisma.qRAuditLog.create({
+          data: { schoolId: simulacro.schoolId, simulacroId, qrTokenHash, action, ip, userAgent }
+        });
+      }
+    } catch (_logErr) {
+      // non-fatal
+    }
+
+    return res.json({ valid: false, error: 'QR inválido' });
+  }
+
+  // simulacroId in token must match request
+  if (payload.simulacroId !== simulacroId) {
+    try {
+      const simulacro = await prisma.physicalSimulacro.findUnique({
+        where: { id: simulacroId },
+        select: { schoolId: true }
+      });
+      if (simulacro) {
+        await prisma.qRAuditLog.create({
+          data: { schoolId: simulacro.schoolId, simulacroId, studentId: payload.studentId, qrTokenHash, action: 'VERIFIED_FAIL', ip, userAgent }
+        });
+      }
+    } catch (_logErr) {
+      // non-fatal
+    }
+    return res.json({ valid: false, error: 'QR inválido' });
+  }
+
+  // Check for existing processed result (duplicate detection)
+  const existing = await prisma.physicalAnswerSheet.findUnique({
+    where: { physicalSimulacroId_qrToken: { physicalSimulacroId: simulacroId, qrToken: String(qrToken) } }
+  });
+
+  if (existing) {
+    return res.json({ valid: false, error: 'Hoja ya procesada' });
+  }
+
+  // Resolve student info
+  const student = await prisma.user.findUnique({
+    where: { id: payload.studentId },
+    select: { id: true, name: true }
+  });
+
+  if (!student) {
+    return res.json({ valid: false, error: 'QR inválido' });
+  }
+
+  // Log successful verification
+  try {
+    await prisma.qRAuditLog.create({
+      data: {
+        schoolId: payload.tenantId,
+        simulacroId,
+        studentId: payload.studentId,
+        qrTokenHash,
+        action: 'VERIFIED_OK',
+        ip,
+        userAgent
+      }
+    });
+  } catch (_logErr) {
+    // non-fatal
+  }
+
+  return res.json({
+    valid: true,
+    studentId: student.id,
+    studentName: student.name
+  });
+});
+
 module.exports = {
   listTeacherOcr,
   getTeacherOcrDetail,
@@ -145,5 +249,6 @@ module.exports = {
   reviewTeacherOcr,
   publishTeacherOcr,
   archiveTeacherOcr,
-  verifyBubble
+  verifyBubble,
+  verifyQR
 };
