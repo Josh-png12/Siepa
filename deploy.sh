@@ -38,13 +38,14 @@ cd "$PROJECT_DIR"
 git pull origin master
 echo "✅ Código actualizado."
 
-# 2. Instalar dependencias del backend
+# 2. Instalar dependencias del backend y aplicar migraciones
 echo ""
 echo "[2/5] Instalando dependencias del backend..."
 cd "$BACKEND_DIR"
 npm install --production
 npx prisma generate
-echo "✅ Dependencias del backend instaladas."
+npx prisma migrate deploy
+echo "✅ Dependencias del backend instaladas y migraciones aplicadas."
 
 # 3. Construir el frontend
 echo ""
