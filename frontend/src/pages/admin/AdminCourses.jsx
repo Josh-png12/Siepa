@@ -136,7 +136,7 @@ function AdminCourses() {
         />
         <select required className={adminTokens.classes.input} value={form.teacher} onChange={(e) => setForm((s) => ({ ...s, teacher: e.target.value }))}>
           <option value="">Selecciona docente</option>
-          {teachers.map((teacher) => <option key={teacher._id} value={teacher._id}>{teacher.name}</option>)}
+          {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}
         </select>
         <button type="submit" className={adminTokens.classes.buttonPrimary}>Crear curso</button>
       </form>
@@ -172,7 +172,7 @@ function AdminCourses() {
             </thead>
             <tbody>
               {data.items.map((course) => (
-                <tr key={course._id} className="border-t">
+                <tr key={course.id} className="border-t">
                   <td className="p-3">{course.name}</td>
                   <td className="p-3">{course.grade}</td>
                   <td className="p-3">{course.year}</td>
@@ -184,16 +184,16 @@ function AdminCourses() {
                       defaultValue=""
                       onChange={(e) => {
                         if (!e.target.value) return;
-                        setAssignTarget({ courseId: course._id, teacherId: e.target.value });
+                        setAssignTarget({ courseId: course.id, teacherId: e.target.value });
                         e.target.value = '';
                       }}
                     >
                       <option value="">Seleccionar</option>
-                      {teachers.map((teacher) => <option key={teacher._id} value={teacher._id}>{teacher.name}</option>)}
+                      {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}
                     </select>
                   </td>
                   <td className="p-3">
-                    <button type="button" onClick={() => setDeleteId(course._id)} className="px-2 py-1 rounded bg-red-600 text-white">Eliminar</button>
+                    <button type="button" onClick={() => setDeleteId(course.id)} className="px-2 py-1 rounded bg-red-600 text-white">Eliminar</button>
                   </td>
                 </tr>
               ))}

@@ -393,7 +393,7 @@ export const adminRejectQuestion = (id) =>
   api.post(`/admin/questions/${id}/reject`).then((res) => res.data);
 
 export const adminQuestionStatsByArea = () =>
-  api.get('/admin/questions/stats-by-area').then((res) => res.data);
+  api.get('/admin/questions/stats/area').then((res) => res.data);
 
 export const adminListGovernanceSimulacros = (params = {}) =>
   api.get('/admin/simulacros', { params: cleanParams(params) }).then((res) => res.data);
