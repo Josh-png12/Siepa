@@ -271,6 +271,15 @@ export const logMaterialAccess = (courseId, materialId, payload) =>
 export const studentGetOverview = () =>
   api.get('/student/overview').then((res) => res.data);
 
+export const studentGetDashboardStats = () =>
+  api.get('/student/dashboard-stats').then((res) => res.data);
+
+export const studentGetAreaProgress = () =>
+  api.get('/student/area-progress').then((res) => res.data);
+
+export const studentUpdateAreaTarget = (area, targetScore) =>
+  api.patch('/student/area-progress/target', { area, targetScore }).then((res) => res.data);
+
 export const studentGetSimulacros = (params = {}) =>
   api.get('/student/simulacros', { params: cleanParams(params) }).then((res) => res.data);
 

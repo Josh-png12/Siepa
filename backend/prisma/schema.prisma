@@ -124,6 +124,14 @@ enum QRAuditAction {
   EXPIRED
 }
 
+enum IcfesArea {
+  LECTURA_CRITICA
+  MATEMATICAS
+  CIENCIAS_NATURALES
+  CIENCIAS_SOCIALES
+  INGLES
+}
+
 enum EvaluationType {
   virtual
   physical
@@ -188,8 +196,11 @@ model School {
   auditLogs          AuditLog[]
   metrics            InstitutionMetrics[]
   systemConfig       SystemConfig?
-  qrAuditLogs        QRAuditLog[]
+  qrAuditLogs         QRAuditLog[]
   simulacroStatusLogs SimulacroStatusLog[]
+  studentStreaks       StudentStreak[]
+  studentBadges        StudentBadge[]
+  studentAreaProgress  StudentAreaProgress[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1134,6 +1145,61 @@ model InstitutionMetrics {
 
   @@unique([schoolId, date])
   @@index([schoolId, date(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGAGEMENT — Streaks, Badges, Area Progress
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One row per student. Tracks daily activity streaks.
+model StudentStreak {
+  id               String    @id @default(cuid())
+  studentId        String    @unique
+  schoolId         String
+  school           School    @relation(fields: [schoolId], references: [id])
+  currentStreak    Int       @default(0)
+  longestStreak    Int       @default(0)
+  lastActivityDate DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  @@index([schoolId])
+}
+
+// One row per badge earned per student. Unique on (studentId, badgeKey) — no duplicates.
+// Badge definitions live in src/config/badges.js — no master table in DB.
+model StudentBadge {
+  id        String    @id @default(cuid())
+  studentId String
+  schoolId  String
+  school    School    @relation(fields: [schoolId], references: [id])
+  badgeKey  String
+  earnedAt  DateTime  @default(now())
+  seenAt    DateTime?
+
+  @@unique([studentId, badgeKey])
+  @@index([studentId, earnedAt(sort: Desc)])
+  @@index([schoolId])
+}
+
+// One row per student per ICFES area. Updated on each simulacro completion.
+// lastScore/bestScore/averageScore are percent correct (0–100).
+// targetScore is the student's own goal on the ICFES 0–500 scale (default 300 = competitive minimum).
+model StudentAreaProgress {
+  id              String    @id @default(cuid())
+  studentId       String
+  schoolId        String
+  school          School    @relation(fields: [schoolId], references: [id])
+  area            IcfesArea
+  lastScore       Float     @default(0)
+  bestScore       Float     @default(0)
+  averageScore    Float     @default(0)
+  targetScore     Float     @default(300)
+  totalSimulacros Int       @default(0)
+  lastUpdated     DateTime  @default(now()) @updatedAt
+
+  @@unique([studentId, area])
+  @@index([studentId])
+  @@index([schoolId])
 }
 
 // Per-school configuration (upload limits, OCR settings, feature flags).

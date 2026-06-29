@@ -17,7 +17,9 @@ const RESULT_STATUS_CONFIDENCE_THRESHOLD = 0.75;
  * Throws ApiError for invalid transitions or access violations.
  */
 const transitionStatus = async ({ sheetId, tenantId, toStatus, changedBy, reason = null }) => {
-  return await prisma.$transaction(async (tx) => {
+  let releasedStudentId = null;
+
+  const updated = await prisma.$transaction(async (tx) => {
     const sheet = await tx.physicalAnswerSheet.findUnique({
       where: { id: sheetId },
       select: {
@@ -53,7 +55,9 @@ const transitionStatus = async ({ sheetId, tenantId, toStatus, changedBy, reason
       updateData.reviewNote = reason;
     }
 
-    const updated = await tx.physicalAnswerSheet.update({
+    if (toStatus === 'RELEASED') releasedStudentId = sheet.studentId;
+
+    const sheetUpdated = await tx.physicalAnswerSheet.update({
       where: { id: sheetId },
       data: updateData
     });
@@ -70,8 +74,18 @@ const transitionStatus = async ({ sheetId, tenantId, toStatus, changedBy, reason
       }
     });
 
-    return updated;
+    return sheetUpdated;
   });
+
+  // Engagement tracking — fire and forget, never blocks the response
+  if (releasedStudentId) {
+    const { processStudentActivity } = require('./engagementService');
+    processStudentActivity(releasedStudentId, tenantId, {}).catch(err =>
+      console.error('[engagement] physical release hook:', err.message)
+    );
+  }
+
+  return updated;
 };
 
 /**
@@ -92,7 +106,7 @@ const releaseAll = async ({ simulacroId, tenantId, changedBy, studentIds = null 
     physicalSimulacro: { schoolId: tenantId }
   };
 
-  return await prisma.$transaction(async (tx) => {
+  const batchResult = await prisma.$transaction(async (tx) => {
     const processedWhere = { ...baseWhere, resultStatus: 'PROCESSED' };
     if (studentIds && studentIds.length) {
       processedWhere.studentId = { in: studentIds };
@@ -134,9 +148,22 @@ const releaseAll = async ({ simulacroId, tenantId, changedBy, studentIds = null 
 
     return {
       released: toRelease.length,
-      skipped: { pending: skippedPending, review: skippedReview }
+      skipped: { pending: skippedPending, review: skippedReview },
+      releasedStudents: toRelease.map(s => s.studentId)
     };
   });
+
+  // Engagement tracking for each released student — fire and forget
+  if (batchResult.releasedStudents && batchResult.releasedStudents.length) {
+    const { processStudentActivity } = require('./engagementService');
+    Promise.allSettled(
+      batchResult.releasedStudents.map(sid =>
+        processStudentActivity(sid, tenantId, {})
+      )
+    ).catch(() => {});
+  }
+
+  return { released: batchResult.released, skipped: batchResult.skipped };
 };
 
 /**

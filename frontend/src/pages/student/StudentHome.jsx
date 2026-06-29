@@ -5,10 +5,13 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { useNavigate } from 'react-router-dom';
-import { studentGetOverview } from '../../services/api';
+import { studentGetOverview, studentGetDashboardStats } from '../../services/api';
 import LoadingSkeleton from '../../components/ui/LoadingSkeleton';
 import ErrorState from '../../components/ui/ErrorState';
 import { useAuthStore } from '../../store/useAuthStore';
+import StreakCard from '../../components/student/StreakCard';
+import AreaProgressRing from '../../components/student/AreaProgressRing';
+import BadgesGrid from '../../components/student/BadgesGrid';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
@@ -129,20 +132,59 @@ function EmptyChart() {
   );
 }
 
+// ── New badge celebration toast ───────────────────────────────────────────────
+function NewBadgeToast({ badges, onClose }) {
+  useEffect(() => {
+    if (!badges.length) return;
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+  }, [badges, onClose]);
+
+  if (!badges.length) return null;
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+      {badges.slice(0, 3).map((b) => (
+        <div
+          key={b.key || b.badgeKey}
+          className="flex items-center gap-3 bg-amber-50 border border-amber-300 rounded-2xl shadow-lg px-4 py-3 animate-slide-up"
+        >
+          <span className="text-2xl">🏅</span>
+          <div>
+            <p className="text-xs font-bold text-amber-800">¡Nueva insignia!</p>
+            <p className="text-sm font-semibold text-slate-800">{b.name}</p>
+          </div>
+          <button type="button" onClick={onClose} className="ml-2 text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 function StudentHome() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [data, setData] = useState(null);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [newBadges, setNewBadges] = useState([]);
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const res = await studentGetOverview();
-        setData(res.data || null);
+        const [overviewRes, statsRes] = await Promise.allSettled([
+          studentGetOverview(),
+          studentGetDashboardStats()
+        ]);
+        if (overviewRes.status === 'fulfilled') setData(overviewRes.value.data || null);
+        if (statsRes.status === 'fulfilled') {
+          const s = statsRes.value.data || null;
+          setStats(s);
+          if (s?.newBadges?.length) setNewBadges(s.newBadges);
+        }
       } catch (err) {
         const d = err.response?.data?.errors;
         setError(Array.isArray(d) && d.length ? d.join(' | ') : 'No se pudo cargar tu inicio');
@@ -231,6 +273,25 @@ function StudentHome() {
           delay={240}
         />
       </section>
+
+      {/* Engagement row: streak + area progress */}
+      <section className="grid gap-4 lg:grid-cols-4">
+        <div className="lg:col-span-1">
+          <StreakCard
+            current={stats?.streak?.current ?? 0}
+            longest={stats?.streak?.longest ?? 0}
+          />
+        </div>
+        <div className="lg:col-span-3">
+          <AreaProgressRing areas={stats?.areaProgress ?? []} />
+        </div>
+      </section>
+
+      {/* Badges */}
+      <BadgesGrid
+        earnedBadges={stats?.badges?.recent ?? []}
+        newBadgeKeys={(stats?.newBadges ?? []).map(b => b.badgeKey || b.key)}
+      />
 
       {/* Charts row */}
       <section className="grid gap-4 lg:grid-cols-3">
@@ -346,6 +407,12 @@ function StudentHome() {
           )}
         </article>
       </section>
+
+      {/* New badge celebration toast */}
+      <NewBadgeToast
+        badges={newBadges}
+        onClose={() => setNewBadges([])}
+      />
     </div>
   );
 }

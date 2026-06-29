@@ -566,9 +566,11 @@ const submitSimulacro = async ({
   }
 
   const moduleByQuestionId = new Map();
+  const sqIdToModuleName = new Map(); // SimulacroQuestion.id → module name (for engagement hook)
   for (const mod of simulacro.modules) {
     for (const sq of mod.questions) {
       if (sq.questionId) moduleByQuestionId.set(sq.questionId, mod.name);
+      sqIdToModuleName.set(sq.id, mod.name);
     }
   }
 
@@ -645,6 +647,33 @@ const submitSimulacro = async ({
       data: { overallTheta, percentile, endTime: new Date(), status: 'submitted', markedForReview: markIds }
     });
   });
+
+  // Engagement tracking — fire and forget, never fails the submit
+  const { processStudentActivity, normalizeArea } = require('./engagementService');
+  (async () => {
+    try {
+      const submittedCount = await prisma.simulacroResult.count({ where: { studentId, status: 'submitted' } });
+
+      const moduleCorrect = new Map();
+      for (const a of dedupedAnswers) {
+        const modName = sqIdToModuleName.get(a.simulacroQuestionId);
+        if (!modName) continue;
+        const e = moduleCorrect.get(modName) || { correct: 0, total: 0 };
+        e.total++;
+        if (a.isCorrect) e.correct++;
+        moduleCorrect.set(modName, e);
+      }
+      const resultadoPorArea = {};
+      for (const [mod, { correct, total }] of moduleCorrect) {
+        const area = normalizeArea(mod);
+        if (area && total > 0) resultadoPorArea[area] = Math.round((correct / total) * 100);
+      }
+
+      await processStudentActivity(studentId, schoolId, { resultadoPorArea, esElPrimero: submittedCount === 1 });
+    } catch (err) {
+      console.error('[engagement] submit hook:', err.message);
+    }
+  })();
 
   return prisma.simulacroResult.findUnique({
     where: { id: attempt.id },
