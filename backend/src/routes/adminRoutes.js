@@ -187,13 +187,26 @@ router.get('/analytics/institution', heavyAdminRateLimit, validateQuery({
   refresh: { type: 'string', enum: ['true', 'false'] }
 }), adminController.getInstitutionMetrics);
 
-// Alias routes — frontend builds that still use the hyphenated form
+// Alias routes — frontend builds that still use the hyphenated / legacy form
 router.get('/governance-ocr', validateQuery({
   refresh: { type: 'string', enum: ['true', 'false'] }
 }), adminController.getGovernanceStats);
 router.get('/institution-analytics', heavyAdminRateLimit, validateQuery({
   refresh: { type: 'string', enum: ['true', 'false'] }
 }), adminController.getInstitutionMetrics);
+router.get('/audit-logs', heavyAdminRateLimit, validateQuery({
+  ...paginationQuerySchema,
+  userId: { type: 'objectId' },
+  action: { type: 'string' },
+  entityType: { type: 'string' },
+  course: { type: 'objectId' },
+  startDate: { type: 'string' },
+  endDate: { type: 'string' }
+}), adminController.listAuditLogs);
+router.get('/governance-simulacros', validateQuery({
+  ...paginationQuerySchema
+}), adminController.listGovernanceSimulacros);
+router.post('/governance-simulacros/:id/force-archive', validateObjectIdParam('id'), adminController.forceArchiveSimulacro);
 router.get('/audit', heavyAdminRateLimit, validateQuery({
   ...paginationQuerySchema,
   userId: { type: 'objectId' },

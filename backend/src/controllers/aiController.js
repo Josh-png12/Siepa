@@ -2,6 +2,10 @@ const prisma = require('../config/prisma');
 const { safeExplain, generateQuestions } = require('../services/aiExplanationService');
 
 const explainAnswer = async (req, res) => {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return res.status(503).json({ error: 'Servicio de IA no configurado' });
+  }
+
   try {
     const studentId = req.user.id;
     const { resultId, answerId } = req.body;
@@ -83,6 +87,10 @@ const explainAnswer = async (req, res) => {
 };
 
 const generateQuestionsHandler = async (req, res) => {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return res.status(503).json({ error: 'Servicio de IA no configurado' });
+  }
+
   try {
     const { area, competencia, dificultad, tema, cantidad } = req.body;
 

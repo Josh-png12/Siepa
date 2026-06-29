@@ -369,7 +369,7 @@ export const adminGetInstitutionAnalytics = (params = {}) =>
   api.get('/admin/analytics/institution', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminGetAuditLogs = (params = {}) =>
-  api.get('/admin/audit-logs', { params: cleanParams(params) }).then((res) => res.data);
+  api.get('/admin/audit', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminGetConfig = () =>
   api.get('/admin/config').then((res) => res.data);
@@ -396,10 +396,10 @@ export const adminQuestionStatsByArea = () =>
   api.get('/admin/questions/stats-by-area').then((res) => res.data);
 
 export const adminListGovernanceSimulacros = (params = {}) =>
-  api.get('/admin/governance-simulacros', { params: cleanParams(params) }).then((res) => res.data);
+  api.get('/admin/simulacros', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminForceArchiveSimulacro = (id) =>
-  api.post(`/admin/governance-simulacros/${id}/force-archive`).then((res) => res.data);
+  api.patch(`/admin/simulacros/${id}/force-archive`).then((res) => res.data);
 
 export const adminListPhysicalTemplates = (params = {}) =>
   api.get('/admin/physical-templates', { params: cleanParams(params) }).then((res) => res.data);

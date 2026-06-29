@@ -46,9 +46,9 @@ function AdminSimulacros() {
   }, [filters.page, filters.limit]);
 
   const archive = async () => {
-    if (!target?._id) return;
+    if (!target?.id) return;
     try {
-      await adminForceArchiveSimulacro(target._id, target.type);
+      await adminForceArchiveSimulacro(target.id, target.type);
       setTarget(null);
       setToast({ type: 'success', message: 'Simulacro archivado.' });
       await load();
@@ -107,7 +107,7 @@ function AdminSimulacros() {
             </thead>
             <tbody>
               {data.items.map((item) => (
-                <tr key={`${item.type}-${item._id}`} className="border-t">
+                <tr key={`${item.type}-${item.id}`} className="border-t">
                   <td className="p-3">
                     <span className={`rounded-full px-2 py-1 text-xs font-semibold ${item.type === 'physical' ? 'bg-indigo-100 text-indigo-700' : 'bg-sky-100 text-sky-700'}`}>
                       {item.type === 'physical' ? 'Fisico' : 'Virtual'}
