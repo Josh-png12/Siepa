@@ -1,4 +1,3 @@
-// backend/src/services/evaluationService.js
 const Response = require('../models/Response');
 const Report = require('../models/Report');
 const Booklet = require('../models/Booklet');

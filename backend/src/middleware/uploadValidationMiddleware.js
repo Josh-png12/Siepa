@@ -1,4 +1,3 @@
-// backend/src/middleware/uploadValidationMiddleware.js
 // Validates file uploads: size, MIME type, and file count
 
 const path = require('path');

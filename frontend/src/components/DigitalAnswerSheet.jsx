@@ -1,4 +1,3 @@
-// frontend/src/components/DigitalAnswerSheet.jsx
 import { useState, useEffect } from 'react';
 
 function DigitalAnswerSheet({ totalQuestions = 120, selectedAnswers = {}, onAnswerSelect }) {

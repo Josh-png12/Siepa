@@ -1,4 +1,3 @@
-// backend/src/config/logger.js
 // Winston structured logger for SIEPA production
 
 const winston = require('winston');

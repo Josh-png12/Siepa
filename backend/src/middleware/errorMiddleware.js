@@ -1,4 +1,3 @@
-// backend/src/middleware/errorMiddleware.js
 // Global error handling middleware with Winston logging
 
 const ApiError = require('../utils/ApiError');

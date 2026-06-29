@@ -89,7 +89,6 @@ const useAuthStore = create((set, get) => ({
     writeAuthToStorage({ user: userData, token: authToken, remember });
     set({ user: userData, token: authToken, remember });
 
-    // Verify the token is now in the store
     if (import.meta.env.DEV || typeof import.meta.env.DEV === 'undefined') {
       const stored = useAuthStore.getState().token;
       console.log(

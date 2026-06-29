@@ -1,4 +1,3 @@
-// backend/src/services/analyticsService.js
 const prisma = require('../config/prisma');
 
 const calculateAnalytics = async (studentId) => {

@@ -1,4 +1,3 @@
-// frontend/src/pages/Simulacro.js
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBooklet } from '../services/api';

@@ -1,4 +1,3 @@
-﻿// backend/src/routes/studentRoutes.js
 const express = require('express');
 const { protect, roleCheck } = require('../middleware/authMiddleware');
 const { sanitizeInput } = require('../middleware/sanitizeInputMiddleware');

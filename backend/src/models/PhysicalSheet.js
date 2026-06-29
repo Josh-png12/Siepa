@@ -1,4 +1,3 @@
-// backend/src/models/PhysicalSheet.js
 const mongoose = require('mongoose');
 
 const physicalSheetSchema = new mongoose.Schema(

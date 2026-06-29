@@ -1,4 +1,3 @@
-// backend/src/routes/evaluationRoutes.js
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
 const evaluationController = require('../controllers/evaluationController');

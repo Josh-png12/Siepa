@@ -1,4 +1,3 @@
-// backend/src/routes/reportRoutes.js
 const express = require('express');
 const { protect } = require('../middleware/authMiddleware');
 const { getReport } = require('../controllers/reportController');

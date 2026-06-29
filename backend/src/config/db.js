@@ -1,4 +1,3 @@
-// backend/src/config/db.js
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 

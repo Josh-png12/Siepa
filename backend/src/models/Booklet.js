@@ -1,4 +1,3 @@
-// backend/src/models/Booklet.js
 const mongoose = require('mongoose');
 
 const bookletSchema = new mongoose.Schema({

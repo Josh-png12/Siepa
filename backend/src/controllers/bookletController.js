@@ -1,4 +1,3 @@
-// backend/src/controllers/bookletController.js
 const asyncHandler = require('express-async-handler');
 const { createBooklet, getBooklet } = require('../services/questionService');
 

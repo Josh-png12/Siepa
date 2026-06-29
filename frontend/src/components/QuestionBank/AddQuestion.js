@@ -1,4 +1,3 @@
-// frontend/src/components/QuestionBank/AddQuestion.js
 import { useState } from 'react';
 import { addQuestion } from '../../services/api';
 

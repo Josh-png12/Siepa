@@ -1,4 +1,3 @@
-// backend/src/config/envValidator.js
 // Validates required environment variables on startup
 
 const logger = require('./logger');

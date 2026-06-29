@@ -1,4 +1,3 @@
-// backend/src/routes/aiRoutes.js
 const express = require('express');
 const { protect, roleCheck } = require('../middleware/authMiddleware');
 const { explainAnswer, generateQuestionsHandler, createCaseGroupHandler } = require('../controllers/aiController');

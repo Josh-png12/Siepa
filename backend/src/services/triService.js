@@ -1,4 +1,3 @@
-// backend/src/services/triService.js
 
 /**
  * Modelo Logístico 3PL (3-Parameter Logistic)

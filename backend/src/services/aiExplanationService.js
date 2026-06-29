@@ -1,4 +1,3 @@
-// backend/src/services/aiExplanationService.js
 
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const FALLBACK = 'No se pudo generar la explicación en este momento. Intenta de nuevo más tarde.';

@@ -1,4 +1,3 @@
-// frontend/src/pages/teacher/TeacherDashboard.jsx
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useNavigate } from 'react-router-dom';

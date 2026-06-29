@@ -1,4 +1,3 @@
-// backend/src/models/StudentProgress.js
 const mongoose = require('mongoose');
 
 const studentProgressSchema = new mongoose.Schema(

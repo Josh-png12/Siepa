@@ -1,4 +1,3 @@
-// backend/src/middleware/teacherMiddleware.js
 const Course = require('../models/Course');
 
 const checkCourseOwnership = async (req, res, next) => {

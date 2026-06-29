@@ -1,5 +1,3 @@
-// backend/src/app.js
-// SIEPA Backend - Production-ready Express application
 
 const express = require('express');
 const helmet = require('helmet');

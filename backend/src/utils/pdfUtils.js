@@ -1,4 +1,3 @@
-// backend/src/utils/pdfUtils.js
 const jsPDF = require('jspdf');
 
 const generatePDF = (booklet) => {

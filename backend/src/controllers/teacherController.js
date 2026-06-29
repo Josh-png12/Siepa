@@ -1,4 +1,3 @@
-// backend/src/controllers/teacherController.js
 const multer = require('multer');
 const path = require('path');
 const prisma = require('../config/prisma');

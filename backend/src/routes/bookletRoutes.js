@@ -1,4 +1,3 @@
-// backend/src/routes/bookletRoutes.js
 const express = require('express');
 const { protect, roleCheck } = require('../middleware/authMiddleware');
 const { create, get } = require('../controllers/bookletController');

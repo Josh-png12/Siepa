@@ -1,4 +1,3 @@
-// backend/src/services/courseService.js
 const Course = require('../models/Course');
 const StudentProgress = require('../models/StudentProgress'); // Si necesitas para analítica extendida
 const mongoose = require('mongoose'); // Para ObjectId validation

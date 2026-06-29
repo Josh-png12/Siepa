@@ -1,4 +1,3 @@
-// frontend/src/components/Evaluation/Evaluation.js
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { startEvaluation, submitEvaluation } from '../../services/api'; // tus funciones API

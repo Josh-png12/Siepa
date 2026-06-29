@@ -1,4 +1,3 @@
-// frontend/src/pages/teacher/TeacherLayout.jsx
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import TeacherSidebar from './TeacherSidebar.jsx';

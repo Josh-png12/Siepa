@@ -1,4 +1,3 @@
-// frontend/src/components/BookletDetail/BookletDetail.js
 import { useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { getBooklet, getBookletPDF } from '../../services/api'; // Asegúrate de tener esta función

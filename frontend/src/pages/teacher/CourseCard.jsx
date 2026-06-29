@@ -1,4 +1,3 @@
-// frontend/src/components/teacher/CourseTable.jsx
 function CourseTable({ courses }) {
   return (
     <table className="w-full text-sm">

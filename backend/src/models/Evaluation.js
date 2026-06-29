@@ -1,4 +1,3 @@
-// backend/src/models/Evaluation.js
 const mongoose = require('mongoose');
 
 const evaluationSchema = new mongoose.Schema({

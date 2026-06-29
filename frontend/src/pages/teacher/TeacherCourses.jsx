@@ -1,4 +1,3 @@
-// frontend/src/pages/teacher/TeacherCourses.jsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';

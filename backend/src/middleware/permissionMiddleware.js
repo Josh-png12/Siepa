@@ -1,4 +1,3 @@
-// backend/src/middleware/permissionMiddleware.js
 const Question = require('../models/Question');
 
 const checkQuestionOwnership = async (req, res, next) => {
