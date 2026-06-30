@@ -49,6 +49,7 @@ import AdminConfig from './pages/admin/AdminConfig.jsx';
 import AdminAuditLogs from './pages/admin/AdminAuditLogs.jsx';
 import AdminPdfImport from './pages/admin/AdminPdfImport.jsx';
 import AdminPdfImportDetail from './pages/admin/AdminPdfImportDetail.jsx';
+import AdminSandbox from './pages/admin/AdminSandbox.jsx';
 
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
@@ -173,6 +174,7 @@ function App() {
         <Route path="config" element={<AdminConfig />} />
         <Route path="pdf-import" element={<AdminPdfImport />} />
         <Route path="pdf-import/:id" element={<AdminPdfImportDetail />} />
+        <Route path="sandbox" element={<AdminSandbox />} />
       </Route>
 
       <Route path="/dashboard" element={<RoleRedirect />} />

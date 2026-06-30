@@ -238,7 +238,8 @@ const verifyQR = asyncHandler(async (req, res) => {
   return res.json({
     valid: true,
     studentId: student.id,
-    studentName: student.name
+    studentName: student.name,
+    isSandbox: Boolean(payload.isSandbox)
   });
 });
 

@@ -34,7 +34,16 @@ const saveDoc = async (doc, targetPath) => {
   await fs.promises.writeFile(targetPath, buffer);
 };
 
-const renderExamPdf = async ({ student, simulacro, questions, destinationPath }) => {
+const addSandboxWatermark = (doc) => {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(44);
+  doc.setTextColor(210, 30, 30);
+  doc.text('PRUEBA - NO VÁLIDO', 108, 148, { align: 'center', angle: 45 });
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+};
+
+const renderExamPdf = async ({ student, simulacro, questions, destinationPath, isSandbox = false }) => {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
 
   doc.setFont('helvetica', 'bold');
@@ -74,10 +83,11 @@ const renderExamPdf = async ({ student, simulacro, questions, destinationPath })
     y += Math.max(8, optionLines.length * 4 + 2);
   });
 
+  if (isSandbox) addSandboxWatermark(doc);
   await saveDoc(doc, destinationPath);
 };
 
-const renderOmrPdf = async ({ student, simulacro, destinationPath }) => {
+const renderOmrPdf = async ({ student, simulacro, destinationPath, isSandbox = false }) => {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
 
   const originX = omrCoordinates.gridOrigin.x;
@@ -130,10 +140,11 @@ const renderOmrPdf = async ({ student, simulacro, destinationPath }) => {
     doc.rect(x, y, 2.5, 2.5, 'F');
   });
 
+  if (isSandbox) addSandboxWatermark(doc);
   await saveDoc(doc, destinationPath);
 };
 
-const generateStudentDocuments = async ({ simulacro, students, questions }) => {
+const generateStudentDocuments = async ({ simulacro, students, questions, isSandbox = false }) => {
   const runFolder = path.join(OUTPUT_BASE, simulacro.simulacroPhysicalId);
   const examFolder = path.join(runFolder, 'exam');
   const omrFolder = path.join(runFolder, 'omr');
@@ -154,13 +165,15 @@ const generateStudentDocuments = async ({ simulacro, students, questions }) => {
       student,
       simulacro,
       questions,
-      destinationPath: examPath
+      destinationPath: examPath,
+      isSandbox
     });
 
     await renderOmrPdf({
       student,
       simulacro,
-      destinationPath: omrPath
+      destinationPath: omrPath,
+      isSandbox
     });
 
     packages.push({

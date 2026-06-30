@@ -15,12 +15,12 @@ const getSecret = () => {
  * Payload: base64url(JSON[studentId, simulacroId, tenantId, issuedAt, expiresAt])
  * Format:  {payload_b64url}.{hmac_sha256_b64url}
  */
-const generateQRToken = ({ studentId, simulacroId, tenantId }) => {
+const generateQRToken = ({ studentId, simulacroId, tenantId, isSandbox = false }) => {
   const issuedAt = Math.floor(Date.now() / 1000);
   const expiresAt = issuedAt + EXPIRY_SECONDS;
 
   const payload = Buffer.from(
-    JSON.stringify([studentId, simulacroId, tenantId, issuedAt, expiresAt])
+    JSON.stringify([studentId, simulacroId, tenantId, issuedAt, expiresAt, isSandbox])
   ).toString('base64url');
 
   const sig = crypto.createHmac('sha256', getSecret()).update(payload).digest('base64url');
@@ -65,7 +65,7 @@ const verifyQRToken = (token) => {
 
   if (!Array.isArray(parsed) || parsed.length < 5) throw new Error('INVALID_TOKEN_PAYLOAD');
 
-  const [studentId, simulacroId, tenantId, issuedAt, expiresAt] = parsed;
+  const [studentId, simulacroId, tenantId, issuedAt, expiresAt, isSandbox = false] = parsed;
 
   if (!studentId || !simulacroId || !tenantId || !issuedAt || !expiresAt) {
     throw new Error('INVALID_TOKEN_PAYLOAD');
@@ -79,6 +79,7 @@ const verifyQRToken = (token) => {
     tenantId: String(tenantId),
     issuedAt: new Date(issuedAt * 1000),
     expiresAt: new Date(expiresAt * 1000),
+    isSandbox: Boolean(isSandbox),
   };
 };
 

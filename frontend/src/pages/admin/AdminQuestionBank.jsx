@@ -11,15 +11,25 @@ import ErrorState from '../../components/ui/ErrorState';
 import Toast from '../../components/ui/Toast';
 import { adminTokens } from './adminTokens';
 
+const TABS = [
+  { id: 'pending',  label: 'Pendientes de revision' },
+  { id: 'approved', label: 'Banco aprobado' }
+];
+
+const tabFilters = {
+  pending:  { calibrationStatus: 'experimental', visibility: 'institutional' },
+  approved: { calibrationStatus: 'calibrated' }
+};
+
 const defaultFilters = {
   q: '',
   area: '',
-  estado: '',
   page: 1,
   limit: 20
 };
 
 function AdminQuestionBank() {
+  const [tab, setTab] = useState('pending');
   const [filters, setFilters] = useState(defaultFilters);
   const [data, setData] = useState({ items: [], pagination: {} });
   const [stats, setStats] = useState([]);
@@ -31,7 +41,7 @@ function AdminQuestionBank() {
   const load = async () => {
     try {
       setLoading(true);
-      const res = await adminListQuestions(filters);
+      const res = await adminListQuestions({ ...filters, ...tabFilters[tab] });
       setData(res.data || { items: [], pagination: {} });
       setError('');
     } catch (err) {
@@ -59,11 +69,16 @@ function AdminQuestionBank() {
 
   useEffect(() => {
     load();
-  }, [filters.page, filters.limit, filters.area, filters.estado, filters.q]);
+  }, [tab, filters.page, filters.limit, filters.area, filters.q]);
 
   useEffect(() => {
     loadStats();
   }, []);
+
+  const switchTab = (nextTab) => {
+    setTab(nextTab);
+    setFilters(defaultFilters);
+  };
 
   const moderate = async (id, action) => {
     try {
@@ -92,7 +107,27 @@ function AdminQuestionBank() {
         <p className={adminTokens.classes.subtitle}>Moderacion institucional de calidad y estado de preguntas.</p>
       </div>
 
-      <div className={`${adminTokens.classes.card} p-4 grid md:grid-cols-4 gap-2`}>
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-slate-200">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => switchTab(t.id)}
+            className={[
+              'px-4 py-2 text-sm font-medium rounded-t-lg transition-colors',
+              tab === t.id
+                ? 'bg-white border border-b-white border-slate-200 text-[#0A2E57] -mb-px'
+                : 'text-slate-500 hover:text-slate-700'
+            ].join(' ')}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className={`${adminTokens.classes.card} p-4 grid md:grid-cols-3 gap-2`}>
         <input
           placeholder="Buscar por texto, area o competencia"
           className={adminTokens.classes.input}
@@ -105,15 +140,6 @@ function AdminQuestionBank() {
           value={filters.area}
           onChange={(e) => setFilters((prev) => ({ ...prev, page: 1, area: e.target.value }))}
         />
-        <select
-          className={adminTokens.classes.input}
-          value={filters.estado}
-          onChange={(e) => setFilters((prev) => ({ ...prev, page: 1, estado: e.target.value }))}
-        >
-          <option value="">Todos los estados</option>
-          <option value="publicada">publicada</option>
-          <option value="borrador">borrador</option>
-        </select>
         <button type="button" className={adminTokens.classes.buttonGhost} onClick={() => setFilters(defaultFilters)}>
           Reset filtros
         </button>
@@ -132,7 +158,7 @@ function AdminQuestionBank() {
           ) : data.items.length === 0 ? (
             <EmptyState
               title="Sin preguntas para mostrar"
-              description="Ajusta filtros o limpia la busqueda para ver resultados."
+              description={tab === 'pending' ? 'No hay preguntas pendientes de revision.' : 'No hay preguntas aprobadas aun.'}
               actionLabel="Reset filtros"
               onAction={() => setFilters(defaultFilters)}
             />
@@ -145,7 +171,7 @@ function AdminQuestionBank() {
                   <th className="p-3">Competencia</th>
                   <th className="p-3">Estado</th>
                   <th className="p-3">Creador</th>
-                  <th className="p-3">Acciones</th>
+                  {tab === 'pending' && <th className="p-3">Acciones</th>}
                 </tr>
               </thead>
               <tbody>
@@ -160,14 +186,16 @@ function AdminQuestionBank() {
                       </span>
                     </td>
                     <td className="p-3">{item.createdBy?.name || item.createdBy?.email || 'N/A'}</td>
-                    <td className="p-3 space-x-2">
-                      <button type="button" onClick={() => moderate(item.id, 'approve')} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
-                        Aprobar
-                      </button>
-                      <button type="button" onClick={() => moderate(item.id, 'reject')} className="rounded bg-amber-600 px-2 py-1 text-xs text-white">
-                        Rechazar
-                      </button>
-                    </td>
+                    {tab === 'pending' && (
+                      <td className="p-3 space-x-2">
+                        <button type="button" onClick={() => moderate(item.id, 'approve')} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
+                          Aprobar
+                        </button>
+                        <button type="button" onClick={() => moderate(item.id, 'reject')} className="rounded bg-amber-600 px-2 py-1 text-xs text-white">
+                          Rechazar
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

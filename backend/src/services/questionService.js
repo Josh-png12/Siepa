@@ -248,7 +248,7 @@ const listQuestions = async (query, user) => {
   if (user.role !== 'admin') {
     where.OR = [
       { createdById: user.id },
-      { visibility: { in: ['institutional', 'national'] } }
+      { visibility: { in: ['institutional', 'national'] }, calibrationStatus: 'calibrated' }
     ];
   }
 

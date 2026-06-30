@@ -20,7 +20,7 @@ const { transitionStatus, RESULT_STATUS_CONFIDENCE_THRESHOLD } = require('./simu
 const FILE_RETENTION_DAYS = Number(process.env.FILE_RETENTION_DAYS || 14);
 
 const ensureTeacherAccess = async ({ simulacroId, user }) => {
-  const where = { id: simulacroId };
+  const where = { id: simulacroId, isSandbox: false };
   if (user.role !== 'admin') where.teacherId = user.id;
 
   const simulacro = await prisma.physicalSimulacro.findFirst({
@@ -200,7 +200,7 @@ const buildTeacherSimulacroStats = async (simulacroIds) => {
 const listTeacherOcrSimulacros = async ({ user, query }) => {
   const { page, limit, skip } = parsePagination(query);
 
-  const where = { teacherId: user.id };
+  const where = { teacherId: user.id, isSandbox: false };
   if (query.status) where.status = query.status;
 
   const [total, items] = await Promise.all([
@@ -303,6 +303,7 @@ const ensureSafePathForDelete = async (rawFilePath) => {
 };
 
 const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, thetaCalculator }) => {
+  const isSandbox = Boolean(simulacro.isSandbox);
   let resolvedPayloads = pagePayloads;
   if (!Array.isArray(resolvedPayloads) || resolvedPayloads.length === 0) {
     const { generatePagePayloads } = require('./bubbleDetectionService');
@@ -321,6 +322,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
           studentId: user.id,
           qrToken: `missing-qr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          isSandbox,
           parsedAnswers: [],
           status: 'invalid',
           errors: [{ type: 'MISSING_QR', message: 'QR not detected' }],
@@ -355,6 +357,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
           studentId: user.id,
           qrToken,
           rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          isSandbox,
           parsedAnswers: [],
           status: 'invalid',
           errors: [{ type: 'MISSING_STUDENT', message: 'Student not found in QR token' }],
@@ -373,6 +376,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
           studentId: user.id,
           qrToken,
           rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          isSandbox,
           parsedAnswers: [],
           status: 'invalid',
           errors: [{ type: 'MISSING_STUDENT', message: 'Student user not found' }],
@@ -394,6 +398,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
           studentId: extractedStudentUserId,
           qrToken,
           rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+          isSandbox,
           parsedAnswers: [],
           status: 'invalid',
           errors: [{ type: 'STUDENT_NOT_IN_COURSE', message: 'Student does not belong to assigned courses' }],
@@ -412,6 +417,7 @@ const processUploadedFileJob = async ({ user, simulacro, file, pagePayloads, the
         studentId: extractedStudentUserId,
         qrToken,
         rawFilePath: path.relative(process.cwd(), file.path).replace(/\\/g, '/'),
+        isSandbox,
         parsedAnswers: evaluated.parsedAnswers,
         score: evaluated.rawScore,
         theta: evaluated.theta,
@@ -555,6 +561,10 @@ const buildEvaluationFromSheet = ({ simulacro, sheet }) => {
 
 const publishTeacherOcrResults = async ({ user, simulacroId }) => {
   const simulacro = await ensureTeacherAccess({ simulacroId, user });
+
+  if (simulacro.isSandbox) {
+    throw new ApiError(400, 'ValidationError', ['Los simulacros sandbox no se pueden publicar a registros reales de estudiantes']);
+  }
 
   const pendingCount = await prisma.physicalAnswerSheet.count({
     where: { physicalSimulacroId: simulacro.id, status: 'needsReview' }

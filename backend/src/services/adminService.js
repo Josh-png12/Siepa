@@ -319,6 +319,8 @@ const listQuestions = async ({ schoolId, query }) => {
   if (query.estado) where.estado = query.estado;
   if (query.area) where.area = query.area;
   if (query.competencia) where.competencia = query.competencia;
+  if (query.calibrationStatus) where.calibrationStatus = query.calibrationStatus;
+  if (query.visibility) where.visibility = query.visibility;
   if (query.createdBy) where.createdById = query.createdBy;
   if (query.q) {
     where.OR = [
@@ -374,8 +376,8 @@ const moderateQuestion = async ({ schoolId, questionId, action }) => {
   if (!question) throw buildError('Pregunta no encontrada', 404);
 
   const patch = action === 'approve'
-    ? { estado: 'publicada', calibrationStatus: 'calibrated' }
-    : { estado: 'borrador' };
+    ? { estado: 'publicada', visibility: 'institutional', calibrationStatus: 'calibrated' }
+    : { estado: 'borrador', visibility: 'private' };
 
   return prisma.question.update({ where: { id: questionId }, data: patch });
 };
@@ -402,7 +404,7 @@ const updateQuestionTriParams = async ({ schoolId, questionId, triParams }) => {
 
 const listPhysicalSimulacros = async ({ schoolId, query }) => {
   const { page, limit, skip } = parsePagination(query);
-  const where = { schoolId };
+  const where = { schoolId, isSandbox: false };
   if (query.status) where.status = query.status;
 
   const [items, total] = await Promise.all([
@@ -434,7 +436,7 @@ const listGovernanceSimulacros = async ({ schoolId, query }) => {
       }
     }),
     prisma.physicalSimulacro.findMany({
-      where: { schoolId },
+      where: { schoolId, isSandbox: false },
       select: {
         id: true, title: true, status: true, createdAt: true,
         teacher: { select: { id: true, name: true, email: true } }
@@ -620,7 +622,7 @@ const getGovernanceStats = async ({ schoolId, forceRefresh = false }) => {
   if (!forceRefresh && cached && now - cached.createdAt < CACHE_TTL_MS) return cached.value;
 
   const simulacros = await prisma.physicalSimulacro.findMany({
-    where: { ...(schoolId && { schoolId }) },
+    where: { ...(schoolId && { schoolId }), isSandbox: false },
     include: { courses: { select: { id: true, enrollments: { select: { studentId: true } } } } }
   });
 

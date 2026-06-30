@@ -23,7 +23,10 @@ const sections = [
   },
   {
     title: 'OCR',
-    links: [{ to: 'templates', label: 'Plantillas OCR', icon: 'OC' }]
+    links: [
+      { to: 'templates', label: 'Plantillas OCR', icon: 'OC' },
+      { to: 'sandbox', label: 'Espacio de Prueba', icon: 'SB' }
+    ]
   },
   {
     title: 'Analisis',
