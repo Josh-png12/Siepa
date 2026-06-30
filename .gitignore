@@ -34,3 +34,13 @@ frontend/dist/
 # Coverage
 coverage/
 .vercel
+
+# Claude Code — worktrees, local settings, and tool artifacts
+.claude/
+
+# codebase-memory-mcp install artifacts
+cbm-ui-install/
+cbm-ui.zip
+install.ps1
+setup-windows.ps1
+*.zip
