@@ -1,9 +1,10 @@
-const mongoose = require('mongoose');
 const ApiError = require('../utils/ApiError');
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-const objectId = (value) => mongoose.Types.ObjectId.isValid(String(value));
+// Prisma uses CUIDs/UUIDs, not MongoDB ObjectIds — same regex as objectIdMiddleware.js
+const CUID_RE = /^[a-zA-Z0-9_-]{10,64}$/;
+const objectId = (value) => CUID_RE.test(String(value));
 
 const validateValue = (fieldPath, value, rule, errors) => {
   if (value === undefined || value === null) {
