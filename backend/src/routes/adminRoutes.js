@@ -232,7 +232,8 @@ router.get('/institution-report/download', reportRateLimit, validateQuery({
 // SANDBOX
 router.get('/sandbox/simulacros', adminController.listSandboxSimulacros);
 router.post('/sandbox/generate-test-sheet', validateBody({
-  studentId: { type: 'objectId', required: true }
+  studentId: { type: 'objectId', required: true },
+  session: { type: 'string', enum: ['SESION_1', 'SESION_2', 'AMBAS'] }
 }), adminController.generateSandboxSheet);
 router.get('/sandbox/test-results/:simulacroId', validateObjectIdParam('simulacroId'), adminController.getSandboxResults);
 
