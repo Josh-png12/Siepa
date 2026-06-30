@@ -387,10 +387,10 @@ export const adminListQuestions = (params = {}) =>
   api.get('/admin/questions', { params: cleanParams(params) }).then((res) => res.data);
 
 export const adminApproveQuestion = (id) =>
-  api.post(`/admin/questions/${id}/approve`).then((res) => res.data);
+  api.patch(`/admin/questions/${id}/approve`).then((res) => res.data);
 
 export const adminRejectQuestion = (id) =>
-  api.post(`/admin/questions/${id}/reject`).then((res) => res.data);
+  api.patch(`/admin/questions/${id}/reject`).then((res) => res.data);
 
 export const adminQuestionStatsByArea = () =>
   api.get('/admin/questions/stats/area').then((res) => res.data);

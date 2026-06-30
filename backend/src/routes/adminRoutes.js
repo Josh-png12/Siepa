@@ -113,6 +113,8 @@ router.get('/questions/stats/area', adminController.questionStatsByArea);
 router.get('/questions/stats-by-area', adminController.questionStatsByArea);
 router.patch('/questions/:id/approve', validateObjectIdParam('id'), adminController.approveQuestion);
 router.patch('/questions/:id/reject', validateObjectIdParam('id'), adminController.rejectQuestion);
+router.post('/questions/:id/approve', validateObjectIdParam('id'), adminController.approveQuestion);
+router.post('/questions/:id/reject', validateObjectIdParam('id'), adminController.rejectQuestion);
 router.patch('/questions/:id/tri-params', validateObjectIdParam('id'), validateBody({
   a: { type: 'number', required: true },
   b: { type: 'number', required: true },
