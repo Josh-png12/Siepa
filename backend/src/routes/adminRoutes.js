@@ -224,6 +224,17 @@ router.get('/audit', heavyAdminRateLimit, validateQuery({
 router.get('/reports/institution', reportRateLimit, validateQuery({
   refresh: { type: 'string', enum: ['true', 'false'] }
 }), adminController.getInstitutionReport);
+// Alias used by AdminOverview frontend (keeps frontend URL stable)
+router.get('/institution-report/download', reportRateLimit, validateQuery({
+  refresh: { type: 'string', enum: ['true', 'false'] }
+}), adminController.getInstitutionReport);
+
+// SANDBOX
+router.get('/sandbox/simulacros', adminController.listSandboxSimulacros);
+router.post('/sandbox/generate-test-sheet', validateBody({
+  studentId: { type: 'objectId', required: true }
+}), adminController.generateSandboxSheet);
+router.get('/sandbox/test-results/:simulacroId', validateObjectIdParam('simulacroId'), adminController.getSandboxResults);
 
 // Backward compatibility for existing UI
 router.get('/teachers', adminController.listTeachersLegacy);
