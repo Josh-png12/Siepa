@@ -44,7 +44,7 @@ const generateTestSheet = async ({ adminUser, studentId, session }) => {
   const sessionKey = VALID_SESSIONS.has(session) ? session : 'SESION_1';
   const student = await prisma.user.findFirst({
     where: { id: studentId, schoolId: adminUser.schoolId, deletedAt: null },
-    select: { id: true, name: true }
+    select: { id: true, name: true, documentNumber: true, documentType: true }
   });
   if (!student) throw new ApiError(404, 'NotFound', ['Estudiante no encontrado en este colegio']);
 
@@ -70,7 +70,8 @@ const generateTestSheet = async ({ adminUser, studentId, session }) => {
   const studentForPdf = {
     studentId: student.id,
     studentName: student.name,
-    studentDocument: '',
+    studentDocument: student.documentNumber || '',
+    documentType: student.documentType || 'TI',
     courseName: 'PRUEBA',
     qrPayload: qrToken
   };
