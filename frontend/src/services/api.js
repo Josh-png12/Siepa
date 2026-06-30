@@ -419,8 +419,8 @@ export const adminDeletePhysicalTemplate = (id) =>
 export const adminSandboxListSimulacros = () =>
   api.get('/admin/sandbox/simulacros').then((res) => res.data);
 
-export const adminSandboxGenerateSheet = (studentId) =>
-  api.post('/admin/sandbox/generate-test-sheet', { studentId }).then((res) => res.data);
+export const adminSandboxGenerateSheet = (studentId, session) =>
+  api.post('/admin/sandbox/generate-test-sheet', { studentId, session }).then((res) => res.data);
 
 export const adminSandboxGetResults = (simulacroId) =>
   api.get(`/admin/sandbox/test-results/${simulacroId}`).then((res) => res.data);

@@ -402,9 +402,9 @@ const getActiveTemplateLegacy = async (req, res) => {
 };
 
 const generateSandboxSheet = (req, res) => handle(res, async () => {
-  const { studentId } = req.body || {};
+  const { studentId, session } = req.body || {};
   if (!studentId) throw { status: 400, message: 'studentId es requerido' };
-  return sandboxService.generateTestSheet({ adminUser: req.user, studentId });
+  return sandboxService.generateTestSheet({ adminUser: req.user, studentId, session });
 });
 
 const getSandboxResults = (req, res) => handle(res, async () =>

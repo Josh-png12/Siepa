@@ -38,7 +38,10 @@ const findOrCreateSandboxSimulacro = async ({ schoolId, adminUserId }) => {
   });
 };
 
-const generateTestSheet = async ({ adminUser, studentId }) => {
+const VALID_SESSIONS = new Set(['SESION_1', 'SESION_2', 'AMBAS']);
+
+const generateTestSheet = async ({ adminUser, studentId, session }) => {
+  const sessionKey = VALID_SESSIONS.has(session) ? session : 'SESION_1';
   const student = await prisma.user.findFirst({
     where: { id: studentId, schoolId: adminUser.schoolId, deletedAt: null },
     select: { id: true, name: true }
@@ -60,6 +63,7 @@ const generateTestSheet = async ({ adminUser, studentId }) => {
   const simulacroForPdf = {
     simulacroPhysicalId: sandbox.id,
     questionCount: sandbox.totalQuestions,
+    session: sessionKey,
     date: sandbox.date
   };
 

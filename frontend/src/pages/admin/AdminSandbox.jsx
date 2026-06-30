@@ -25,6 +25,7 @@ function AdminSandbox() {
   const [students, setStudents] = useState([]);
   const [studentId, setStudentId] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
+  const [session, setSession] = useState('SESION_1');
   const [generating, setGenerating] = useState(false);
   const [lastGenerated, setLastGenerated] = useState(null);
   const [sandboxSimulacros, setSandboxSimulacros] = useState([]);
@@ -65,7 +66,7 @@ function AdminSandbox() {
     setSuccessMsg('');
     setGenerating(true);
     try {
-      const res = await adminSandboxGenerateSheet(studentId);
+      const res = await adminSandboxGenerateSheet(studentId, session);
       const data = res?.data || res;
       setLastGenerated(data);
       setSuccessMsg(`Hoja generada para ${data.studentName}. Descarga el PDF y escanéalo con el equipo OMR.`);
@@ -121,6 +122,19 @@ function AdminSandbox() {
           </p>
 
           <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-700">Sesión a probar</label>
+            <select
+              value={session}
+              onChange={(e) => setSession(e.target.value)}
+              className={`${adminTokens.classes.input} w-full text-sm`}
+            >
+              <option value="SESION_1">Sesión 1 (131 preguntas)</option>
+              <option value="SESION_2">Sesión 2 (147 preguntas)</option>
+              <option value="AMBAS">Ambas sesiones</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-sm font-medium text-slate-700">Buscar estudiante</label>
             <input
               type="text"
@@ -165,21 +179,21 @@ function AdminSandbox() {
             <div className="rounded-xl bg-blue-50 border border-blue-100 p-3 space-y-2">
               <p className="text-sm font-medium text-blue-800">Hoja generada — {lastGenerated.studentName}</p>
               <div className="flex flex-col gap-1">
-                <a
-                  href={lastGenerated.omrPdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-blue-700 underline hover:text-blue-900"
-                >
-                  Descargar hoja OMR (para escanear)
-                </a>
+                {lastGenerated.omrPdfUrl && (
+                  <a href={lastGenerated.omrPdfUrl} target="_blank" rel="noreferrer"
+                    className="text-sm text-blue-700 underline hover:text-blue-900">
+                    Descargar hoja OMR{lastGenerated.omrPdfUrlS2 ? ' — Sesión 1' : ' (para escanear)'}
+                  </a>
+                )}
+                {lastGenerated.omrPdfUrlS2 && (
+                  <a href={lastGenerated.omrPdfUrlS2} target="_blank" rel="noreferrer"
+                    className="text-sm text-blue-700 underline hover:text-blue-900">
+                    Descargar hoja OMR — Sesión 2
+                  </a>
+                )}
                 {lastGenerated.examPdfUrl && (
-                  <a
-                    href={lastGenerated.examPdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-blue-700 underline hover:text-blue-900"
-                  >
+                  <a href={lastGenerated.examPdfUrl} target="_blank" rel="noreferrer"
+                    className="text-sm text-blue-700 underline hover:text-blue-900">
                     Descargar hoja de preguntas
                   </a>
                 )}

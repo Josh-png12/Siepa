@@ -131,6 +131,7 @@ const createAdminPhysicalSimulacro = async ({ userId, schoolId, payload }) => {
       startTime: data.startTime || null,
       endTime: data.endTime || null,
       status,
+      session: data.session || 'SESION_1',
       totalQuestions: data.totalQuestions,
       reviewDeadline,
       courses: { connect: data.courses.map((id) => ({ id })) },
@@ -719,7 +720,7 @@ const generateSimulacroSheets = async ({ simulacroId, user, ip, userAgent }) => 
           enrollments: {
             include: {
               student: {
-                include: { user: { select: { id: true, name: true } } }
+                include: { user: { select: { id: true, name: true, documentNumber: true, documentType: true } } }
               }
             }
           }
@@ -743,7 +744,8 @@ const generateSimulacroSheets = async ({ simulacroId, user, ip, userAgent }) => 
         studentMap.set(userId, {
           studentId: userId,
           studentName: enrollment.student.user.name,
-          studentDocument: enrollment.student.identificationNumber || '',
+          studentDocument: enrollment.student.identificationNumber || enrollment.student.user.documentNumber || '',
+          documentType: enrollment.student.identificationType || enrollment.student.user.documentType || 'TI',
           courseName: course.name
         });
       }
@@ -772,6 +774,7 @@ const generateSimulacroSheets = async ({ simulacroId, user, ip, userAgent }) => 
   const simulacroForPdf = {
     simulacroPhysicalId: simulacro.id,
     questionCount: simulacro.totalQuestions,
+    session: simulacro.session || 'SESION_1',
     date: simulacro.date
   };
 
@@ -849,13 +852,20 @@ const generateSimulacroSheets = async ({ simulacroId, user, ip, userAgent }) => 
   return {
     simulacroId: simulacro.id,
     totalStudents: results.length,
-    studentPackages: results.map((pkg) => ({
-      studentId: pkg.studentId,
-      studentName: pkg.studentName,
-      examPdfPath: pkg.examPdfPath,
-      omrPdfPath: pkg.omrPdfPath,
-      pdfHash: pkg.pdfHash
-    }))
+    studentPackages: results.map((pkg) => {
+      const p = {
+        studentId: pkg.studentId,
+        studentName: pkg.studentName,
+        examPdfPath: pkg.examPdfPath,
+        omrPdfPath: pkg.omrPdfPath,
+        pdfHash: pkg.pdfHash
+      };
+      if (pkg.omrPdfPathS2) {
+        p.omrPdfPathS1 = pkg.omrPdfPathS1;
+        p.omrPdfPathS2 = pkg.omrPdfPathS2;
+      }
+      return p;
+    })
   };
 };
 

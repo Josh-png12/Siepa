@@ -159,6 +159,12 @@ enum PdfImportBatchStatus {
   failed
 }
 
+enum IcfesSession {
+  SESION_1
+  SESION_2
+  AMBAS
+}
+
 enum QuestionChangeType {
   create
   update
@@ -721,6 +727,7 @@ model PhysicalSimulacro {
   startTime      String?
   endTime        String?
   status         PhysicalSimulacroStatus @default(draft)
+  session        IcfesSession            @default(SESION_1)
   isSandbox      Boolean                 @default(false)
   totalQuestions Int
   reviewDeadline DateTime

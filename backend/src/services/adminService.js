@@ -461,6 +461,10 @@ const createPhysicalSimulacro = async ({ schoolId, payload }) => {
     if (!payload[field]) throw buildError(`${field} es requerido`, 400);
   }
 
+  const VALID_SESSIONS = new Set(['SESION_1', 'SESION_2', 'AMBAS']);
+  const sessionRaw = String(payload.session || '').toUpperCase();
+  const session = VALID_SESSIONS.has(sessionRaw) ? sessionRaw : 'SESION_1';
+
   return prisma.physicalSimulacro.create({
     data: {
       schoolId,
@@ -473,6 +477,7 @@ const createPhysicalSimulacro = async ({ schoolId, payload }) => {
       totalQuestions: payload.totalQuestions,
       reviewDeadline: payload.reviewDeadline ? new Date(payload.reviewDeadline) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       status: 'draft',
+      session,
       courses: { connect: (payload.courses || []).map((id) => ({ id })) }
     }
   });

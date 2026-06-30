@@ -11,7 +11,8 @@ function PhysicalSimulacroCreate() {
     startTime: '',
     endTime: '',
     assignedCourses: '',
-    questionCount: 50
+    questionCount: 50,
+    session: 'SESION_1'
   });
 
   const [loading, setLoading] = useState(false);
@@ -30,6 +31,7 @@ function PhysicalSimulacroCreate() {
         startTime: form.startTime,
         endTime: form.endTime,
         questionCount: Number(form.questionCount),
+        session: form.session,
         assignedCourses: form.assignedCourses
           .split(',')
           .map((item) => item.trim())
@@ -58,6 +60,15 @@ function PhysicalSimulacroCreate() {
         <input required placeholder="Hora inicio (HH:mm)" value={form.startTime} onChange={(e) => setForm((p) => ({ ...p, startTime: e.target.value }))} className="border rounded-lg px-3 py-2" />
         <input required placeholder="Hora fin (HH:mm)" value={form.endTime} onChange={(e) => setForm((p) => ({ ...p, endTime: e.target.value }))} className="border rounded-lg px-3 py-2" />
         <input required type="number" min="1" max="147" value={form.questionCount} onChange={(e) => setForm((p) => ({ ...p, questionCount: e.target.value }))} className="border rounded-lg px-3 py-2" />
+      </div>
+
+      <div>
+        <label className="text-sm text-slate-600 block mb-1">Sesión ICFES</label>
+        <select value={form.session} onChange={(e) => setForm((p) => ({ ...p, session: e.target.value }))} className="w-full border rounded-lg px-3 py-2">
+          <option value="SESION_1">Sesión 1 (131 preguntas)</option>
+          <option value="SESION_2">Sesión 2 (147 preguntas)</option>
+          <option value="AMBAS">Ambas sesiones</option>
+        </select>
       </div>
 
       <input

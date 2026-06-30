@@ -10,7 +10,8 @@ const VALID_STATUS = new Set([
   'archived'
 ]);
 
-const VALID_OPTIONS = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+const VALID_OPTIONS  = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+const VALID_SESSIONS = new Set(['SESION_1', 'SESION_2', 'AMBAS']);
 
 const normalizeAnswerKey = (answerKey = []) => {
   if (!Array.isArray(answerKey)) return null;
@@ -75,6 +76,9 @@ const validateCreatePhysicalSimulacroPayload = (payload = {}) => {
     });
   }
 
+  const sessionRaw = String(payload.session || '').toUpperCase();
+  const session = VALID_SESSIONS.has(sessionRaw) ? sessionRaw : 'SESION_1';
+
   if (errors.length) return { errors };
 
   return {
@@ -88,6 +92,7 @@ const validateCreatePhysicalSimulacroPayload = (payload = {}) => {
       endTime,
       totalQuestions,
       reviewWindowDays,
+      session,
       answerKey: normalizedAnswerKey
     }
   };
