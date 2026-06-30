@@ -721,6 +721,7 @@ model PhysicalSimulacro {
   startTime      String?
   endTime        String?
   status         PhysicalSimulacroStatus @default(draft)
+  isSandbox      Boolean                 @default(false)
   totalQuestions Int
   reviewDeadline DateTime
   publishedAt    DateTime?
@@ -737,6 +738,7 @@ model PhysicalSimulacro {
   @@index([schoolId, teacherId, status])
   @@index([date(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+  @@index([schoolId, isSandbox])
 }
 
 // Per-question correct answer for a physical simulacro.
@@ -765,6 +767,7 @@ model PhysicalAnswerSheet {
   student             User                      @relation(fields: [studentId], references: [id])
   qrToken             String
   rawFilePath         String
+  isSandbox           Boolean                   @default(false)
   parsedAnswers       Json? // Array<{ questionNumber: number, markedOption: string, confidence: number }>
   score               Float?
   theta               Float?

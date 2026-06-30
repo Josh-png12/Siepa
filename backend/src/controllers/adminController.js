@@ -1,5 +1,6 @@
 const { successResponse, errorResponse } = require('../utils/response');
 const adminService = require('../services/adminService');
+const sandboxService = require('../services/sandboxService');
 const { logAudit } = require('../services/auditLogService');
 const { generateInstitutionReportPdf } = require('../services/adminReportService');
 
@@ -400,6 +401,20 @@ const getActiveTemplateLegacy = async (req, res) => {
   }
 };
 
+const generateSandboxSheet = (req, res) => handle(res, async () => {
+  const { studentId } = req.body || {};
+  if (!studentId) throw { status: 400, message: 'studentId es requerido' };
+  return sandboxService.generateTestSheet({ adminUser: req.user, studentId });
+});
+
+const getSandboxResults = (req, res) => handle(res, async () =>
+  sandboxService.getSandboxResults({ adminUser: req.user, simulacroId: req.params.simulacroId })
+);
+
+const listSandboxSimulacros = (req, res) => handle(res, async () =>
+  sandboxService.listSandboxSimulacros({ adminUser: req.user })
+);
+
 module.exports = {
   listUsers,
   createUser,
@@ -437,5 +452,8 @@ module.exports = {
   getInstitutionReport,
   listTeachersLegacy,
   updateTeacherFeaturesLegacy,
-  getActiveTemplateLegacy
+  getActiveTemplateLegacy,
+  generateSandboxSheet,
+  getSandboxResults,
+  listSandboxSimulacros
 };
