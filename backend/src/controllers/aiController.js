@@ -111,7 +111,7 @@ const generateQuestionsHandler = async (req, res) => {
 
 const createCaseGroupHandler = async (req, res) => {
   try {
-    const { titulo, contenido } = req.body;
+    const { titulo, contenido, fuente } = req.body;
     if (!titulo || !contenido) {
       return res.status(400).json({ message: 'titulo y contenido son requeridos' });
     }
@@ -121,6 +121,7 @@ const createCaseGroupHandler = async (req, res) => {
         schoolId: req.user.schoolId,
         title: String(titulo).trim(),
         contextText: String(contenido).trim(),
+        source: fuente ? String(fuente).trim() : null,
         createdById: req.user.id,
       },
     });

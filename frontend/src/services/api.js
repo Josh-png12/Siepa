@@ -543,8 +543,8 @@ export const aiExplainAnswer = ({ resultId, answerId }) =>
 export const generateAIQuestions = ({ area, competencia, dificultad, tema, cantidad }) =>
   api.post('/ai/generate-questions', { area, competencia, dificultad, tema, cantidad }).then((res) => res.data);
 
-export const createAICaseGroup = ({ titulo, contenido }) =>
-  api.post('/ai/create-case-group', { titulo, contenido }).then((res) => res.data);
+export const createAICaseGroup = ({ titulo, contenido, fuente }) =>
+  api.post('/ai/create-case-group', { titulo, contenido, fuente }).then((res) => res.data);
 
 // Helper to get the base URL for constructing full URLs (e.g., for file downloads)
 export const getApiBaseUrl = () => API_BASE_URL.replace(/\/api\/?$/, '');

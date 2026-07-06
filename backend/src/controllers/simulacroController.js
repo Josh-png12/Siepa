@@ -109,7 +109,8 @@ const submitSimulacro = async (req, res) => {
 const getStudentResults = async (req, res) => {
   try {
     const result = await simulacroService.getStudentResultsForSimulacro(req.params.id, req.user.id);
-    return res.json({ success: true, result });
+    const comparison = await simulacroService.getSimulacroComparison(req.params.id, req.user.id, req.user.schoolId);
+    return res.json({ success: true, result, comparison });
   } catch (error) {
     return handleError(res, error);
   }

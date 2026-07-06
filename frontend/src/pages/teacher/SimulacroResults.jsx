@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { getSimulacroStudentResults, aiExplainAnswer } from '../../services/api';
+import { studentTokens } from '../student/studentTokens.js';
+
+const PRIMARY = studentTokens.colors.primary;
+const EMERALD = studentTokens.colors.emerald;
+const AMBER = studentTokens.colors.amber;
+const ACCENT = studentTokens.colors.accent;
 
 // ─── Conversion helpers ───────────────────────────────────────────────────────
 const thetaToGlobal = (theta) =>
@@ -9,23 +15,44 @@ const thetaToGlobal = (theta) =>
 const thetaToModule = (theta) =>
   Math.max(0, Math.min(100, Math.round(((Number(theta) || 0) + 3) / 6 * 100)));
 
+// Mirrors backend simulacroService.toPercentile — same normal-CDF approximation,
+// so numbers shown here are methodologically consistent with the stored percentile.
+const erfApprox = (x) => {
+  const sign = x < 0 ? -1 : 1;
+  const absX = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * absX);
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-absX * absX);
+  return sign * y;
+};
+
+const toPercentile = (theta) => {
+  const cdf = 0.5 * (1 + erfApprox(Number(theta) / Math.sqrt(2)));
+  return Math.max(1, Math.min(99, Math.round(cdf * 100)));
+};
+
+const LEVEL_COLORS = ['#ef4444', '#f97316', AMBER, EMERALD];
+
 const getPerformanceLevel = (score) => {
-  if (score < 35) return { level: 1, label: 'Nivel 1', color: '#ef4444', light: '#fef2f2', text: 'Bajo' };
-  if (score < 50) return { level: 2, label: 'Nivel 2', color: '#f97316', light: '#fff7ed', text: 'Básico' };
-  if (score < 65) return { level: 3, label: 'Nivel 3', color: '#eab308', light: '#fefce8', text: 'Medio' };
-  return { level: 4, label: 'Nivel 4', color: '#10b981', light: '#f0fdf4', text: 'Alto' };
+  if (score < 35) return { level: 1, label: 'Nivel 1', color: LEVEL_COLORS[0], light: '#fef2f2', text: 'Bajo' };
+  if (score < 50) return { level: 2, label: 'Nivel 2', color: LEVEL_COLORS[1], light: '#fff7ed', text: 'Básico' };
+  if (score < 65) return { level: 3, label: 'Nivel 3', color: LEVEL_COLORS[2], light: '#fffbeb', text: 'Medio' };
+  return { level: 4, label: 'Nivel 4', color: LEVEL_COLORS[3], light: '#f0fdf4', text: 'Alto' };
 };
 
 // ─── Area color/icon map ─────────────────────────────────────────────────────
 const AREA_MAP = [
-  { key: 'lectura',    color: '#3b82f6', bg: '#eff6ff', icon: '📖' },
-  { key: 'matemáti',  color: '#10b981', bg: '#f0fdf4', icon: '📐' },
-  { key: 'matemati',  color: '#10b981', bg: '#f0fdf4', icon: '📐' },
-  { key: 'ciencias',  color: '#f59e0b', bg: '#fffbeb', icon: '🔬' },
-  { key: 'sociales',  color: '#7c3aed', bg: '#f5f3ff', icon: '🌍' },
-  { key: 'inglés',    color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
-  { key: 'ingles',    color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
-  { key: 'english',   color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
+  { key: 'lectura',    areaKey: 'lectura',     color: '#3b82f6', bg: '#eff6ff', icon: '📖' },
+  { key: 'matemáti',   areaKey: 'matematicas', color: EMERALD,   bg: '#f0fdf4', icon: '📐' },
+  { key: 'matemati',   areaKey: 'matematicas', color: EMERALD,   bg: '#f0fdf4', icon: '📐' },
+  { key: 'ciencias',   areaKey: 'ciencias',    color: AMBER,     bg: '#fffbeb', icon: '🔬' },
+  { key: 'sociales',   areaKey: 'sociales',    color: studentTokens.colors.violet, bg: '#f5f3ff', icon: '🌍' },
+  { key: 'inglés',     areaKey: 'ingles',      color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
+  { key: 'ingles',     areaKey: 'ingles',      color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
+  { key: 'english',    areaKey: 'ingles',      color: '#ef4444', bg: '#fef2f2', icon: '🌐' },
 ];
 
 const getAreaConfig = (name = '') => {
@@ -33,62 +60,79 @@ const getAreaConfig = (name = '') => {
   for (const cfg of AREA_MAP) {
     if (lower.includes(cfg.key)) return cfg;
   }
-  return { color: '#6b7280', bg: '#f9fafb', icon: '📚' };
+  return { areaKey: 'otro', color: '#6b7280', bg: '#f9fafb', icon: '📚' };
 };
 
-// ─── Level bar ───────────────────────────────────────────────────────────────
-const LEVEL_COLORS = ['#ef4444', '#f97316', '#eab308', '#10b981'];
+// ─── Nivel de desempeño — descripciones de habilidades ───────────────────────
+// Verificado solo para Lectura Crítica nivel 4 (texto público ICFES provisto).
+// El resto queda con placeholder hasta validar contra la Guía de interpretación
+// y uso de resultados Saber 11 (ICFES) vigente — no se fabrica texto atribuido
+// a ICFES sin poder confirmarlo.
+const PLACEHOLDER_SKILLS = ['Descripción pendiente de validar con la guía oficial del ICFES.'];
 
-function PerformanceLevelBar({ score }) {
-  const { level, label, color, text } = getPerformanceLevel(score);
+const LEVEL_SKILLS = {
+  lectura: {
+    4: [
+      'Propone soluciones a problemas de interpretación que subyacen en un texto.',
+      'Evalúa contenidos, estrategias discursivas y argumentativas presentes en un texto.'
+    ],
+    3: PLACEHOLDER_SKILLS, // TODO: verificar nivel 3 de Lectura Crítica contra la guía oficial ICFES
+    2: PLACEHOLDER_SKILLS, // TODO: verificar nivel 2 de Lectura Crítica contra la guía oficial ICFES
+    1: PLACEHOLDER_SKILLS  // TODO: verificar nivel 1 de Lectura Crítica contra la guía oficial ICFES
+  },
+  // TODO: verificar los 4 niveles de Matemáticas contra la guía oficial ICFES
+  matematicas: { 4: PLACEHOLDER_SKILLS, 3: PLACEHOLDER_SKILLS, 2: PLACEHOLDER_SKILLS, 1: PLACEHOLDER_SKILLS },
+  // TODO: verificar los 4 niveles de Ciencias Naturales contra la guía oficial ICFES
+  ciencias: { 4: PLACEHOLDER_SKILLS, 3: PLACEHOLDER_SKILLS, 2: PLACEHOLDER_SKILLS, 1: PLACEHOLDER_SKILLS },
+  // TODO: verificar los 4 niveles de Sociales y Ciudadanas contra la guía oficial ICFES
+  sociales: { 4: PLACEHOLDER_SKILLS, 3: PLACEHOLDER_SKILLS, 2: PLACEHOLDER_SKILLS, 1: PLACEHOLDER_SKILLS },
+  // TODO: ICFES reporta Inglés en niveles CEFR (A-, A1, A2, B1, B+), no en escala 1-4.
+  // Mientras no calibremos ese mapeo, se mantiene la escala interna 1-4 del simulacro.
+  ingles: { 4: PLACEHOLDER_SKILLS, 3: PLACEHOLDER_SKILLS, 2: PLACEHOLDER_SKILLS, 1: PLACEHOLDER_SKILLS }
+};
+
+const getSkillsFor = (areaKey, level) => LEVEL_SKILLS[areaKey]?.[level] || PLACEHOLDER_SKILLS;
+
+// ─── Barra de percentil (gradiente dinámico, no escalones fijos) ─────────────
+function PercentileBar({ percentile, color = PRIMARY }) {
   return (
-    <div className="mt-3">
-      <div className="flex gap-1 mb-1">
-        {[1, 2, 3, 4].map((l) => (
-          <div
-            key={l}
-            className="flex-1 h-2 rounded-full"
-            style={{ backgroundColor: l <= level ? LEVEL_COLORS[l - 1] : '#e5e7eb' }}
-          />
-        ))}
+    <div>
+      <div
+        className="h-2.5 w-full rounded-full"
+        style={{ background: `linear-gradient(90deg, ${color} ${percentile}%, #e5e7eb ${percentile}%)` }}
+      />
+      <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+        <span>0</span><span>20</span><span>40</span><span>60</span><span>80</span><span>100</span>
       </div>
-      <div className="flex justify-between text-xs text-gray-400 mb-1">
-        <span>N1</span><span>N2</span><span>N3</span><span>N4</span>
-      </div>
-      <p className="text-xs font-medium" style={{ color }}>
-        {label} — {text}
-      </p>
     </div>
   );
 }
 
-// ─── Module card ─────────────────────────────────────────────────────────────
-function ModuleCard({ item }) {
-  const score = thetaToModule(item.theta);
-  const cfg = getAreaConfig(item.moduleName);
-  const { color, light } = getPerformanceLevel(score);
-  const { label: levelLabel } = getPerformanceLevel(score);
-
+// ─── Grilla de nivel de desempeño (escalón + flecha) ─────────────────────────
+function PerformanceLevelGrid({ level }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col">
-      <div className="flex items-start justify-between mb-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-          style={{ backgroundColor: cfg.bg }}
-        >
-          {cfg.icon}
-        </div>
-        <span
-          className="text-xs font-semibold px-2 py-1 rounded-full"
-          style={{ backgroundColor: light, color }}
-        >
-          {levelLabel}
-        </span>
+    <div>
+      <div className="grid grid-cols-4 gap-1.5">
+        {[1, 2, 3, 4].map((l) => (
+          <div key={l} className="flex flex-col items-center gap-1">
+            {l === level ? (
+              <span className="text-xs" style={{ color: LEVEL_COLORS[l - 1] }}>▼</span>
+            ) : (
+              <span className="text-xs text-transparent select-none">▼</span>
+            )}
+            <div
+              className="h-9 w-full rounded-md border flex items-center justify-center text-sm font-bold transition-colors duration-200"
+              style={
+                l <= level
+                  ? { backgroundColor: LEVEL_COLORS[l - 1], borderColor: LEVEL_COLORS[l - 1], color: '#fff' }
+                  : { backgroundColor: '#fff', borderColor: '#e2e8f0', color: '#cbd5e1' }
+              }
+            >
+              {l}
+            </div>
+          </div>
+        ))}
       </div>
-      <p className="text-sm font-medium text-gray-600 mb-1 leading-snug">{item.moduleName}</p>
-      <p className="text-4xl font-black" style={{ color: cfg.color }}>{score}</p>
-      <p className="text-xs text-gray-400 mb-1">de 100 puntos</p>
-      <PerformanceLevelBar score={score} />
     </div>
   );
 }
@@ -106,6 +150,132 @@ function AiExplanationCard({ text }) {
   );
 }
 
+// ─── Modal "¿Cómo se calcula?" ────────────────────────────────────────────────
+function CalcModal({ onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold" style={{ color: PRIMARY }}>¿Cómo se calcula tu puntaje?</h3>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          SIEPA estima tu nivel académico (theta) usando un modelo de Teoría de Respuesta al Ítem (TRI):
+          cada pregunta tiene un nivel de dificultad y discriminación propios, así que acertar preguntas
+          difíciles pesa más que acertar preguntas fáciles.
+        </p>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          Ese nivel (theta) se convierte a la escala ICFES de 0 a 500 para el puntaje global, y a una
+          escala de 0 a 100 por cada prueba. El percentil indica qué porcentaje de una distribución
+          estadística de referencia quedó por debajo de tu resultado.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold text-white transition-colors"
+          style={{ backgroundColor: PRIMARY }}
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Selector de comparación (curso / institucional) ─────────────────────────
+function ComparisonCard({ comparison, scope, onScopeChange }) {
+  const active = scope === 'course' ? comparison?.course : comparison?.school;
+  const hasData = active && active.count > 0 && active.avgOverallTheta !== null;
+  const score = hasData ? thetaToGlobal(active.avgOverallTheta) : null;
+
+  return (
+    <div className="rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+        <select
+          value={scope}
+          onChange={(e) => onScopeChange(e.target.value)}
+          className="w-full bg-transparent text-sm font-medium text-slate-600 focus:outline-none"
+        >
+          <option value="course">Promedio del curso</option>
+          <option value="school">Promedio institucional</option>
+        </select>
+      </div>
+      <div className="px-4 py-4 text-center">
+        {hasData ? (
+          <>
+            <span className="text-3xl font-black" style={{ color: PRIMARY }}>{score}</span>
+            <span className="text-sm text-slate-400">/500</span>
+            <p className="text-xs text-slate-400 mt-1">
+              Basado en {active.count} estudiante{active.count !== 1 ? 's' : ''}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-400 py-2">Aún no hay suficientes datos de tus compañeros.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Panel de detalle por área ────────────────────────────────────────────────
+function AreaDetailPanel({ moduleItem }) {
+  const cfg = getAreaConfig(moduleItem.moduleName);
+  const score = thetaToModule(moduleItem.theta);
+  const percentile = toPercentile(moduleItem.theta);
+  const { level } = getPerformanceLevel(score);
+  const skills = getSkillsFor(cfg.areaKey, level);
+
+  return (
+    <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-6 p-5">
+      {/* Columna izquierda: puntaje + percentil */}
+      <div className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: cfg.color }}>Prueba</p>
+          <p className="text-lg font-bold text-slate-800">{moduleItem.moduleName}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0"
+            style={{ backgroundColor: cfg.bg }}
+          >
+            {cfg.icon}
+          </div>
+          <div>
+            <span className="text-3xl font-black" style={{ color: cfg.color }}>{score}</span>
+            <span className="text-sm text-slate-400">/100</span>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-slate-500 mb-1">¿En qué percentil estás?</p>
+          <PercentileBar percentile={percentile} color={cfg.color} />
+          <p className="text-xs text-slate-500 mt-2">
+            Superaste al <strong>{percentile}%</strong> en esta prueba (referencia estadística SIEPA).
+          </p>
+        </div>
+      </div>
+
+      {/* Columna derecha: nivel de desempeño + habilidades */}
+      <div className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold text-slate-500 mb-2">Nivel de desempeño</p>
+          <PerformanceLevelGrid level={level} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-slate-500 mb-2">¿Qué habilidades reflejan este nivel?</p>
+          <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+            {skills.map((skill, idx) => (
+              <p key={idx} className="text-sm text-slate-600 leading-relaxed flex gap-2">
+                <span className="shrink-0" style={{ color: cfg.color }}>▸</span>
+                {skill}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 function SimulacroResults() {
   const { id } = useParams();
@@ -114,9 +284,13 @@ function SimulacroResults() {
   const isTeacherView = location.pathname.includes('/dashboard/docente');
 
   const [result, setResult] = useState(null);
+  const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(!isTeacherView);
   const [error, setError] = useState('');
   const [explanations, setExplanations] = useState({});
+  const [selectedModule, setSelectedModule] = useState(null);
+  const [compareScope, setCompareScope] = useState('course');
+  const [showCalcModal, setShowCalcModal] = useState(false);
 
   useEffect(() => {
     if (isTeacherView) return;
@@ -126,6 +300,7 @@ function SimulacroResults() {
         setError('');
         const response = await getSimulacroStudentResults(id);
         setResult(response.result);
+        setComparison(response.comparison || null);
       } catch (err) {
         setError(err.response?.data?.message || 'No se pudieron cargar resultados');
       } finally {
@@ -139,6 +314,10 @@ function SimulacroResults() {
     () => result?.thetasByModule || result?.moduleThetas || [],
     [result],
   );
+
+  useEffect(() => {
+    if (moduleRows.length === 1) setSelectedModule(moduleRows[0].moduleName);
+  }, [moduleRows]);
 
   const handleExplain = async (answer) => {
     const answerId = answer.id;
@@ -158,7 +337,7 @@ function SimulacroResults() {
   if (isTeacherView) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold text-[#0A2E57]">Resultados del Simulacro</h1>
+        <h1 className="text-3xl font-bold" style={{ color: PRIMARY }}>Resultados del Simulacro</h1>
         <div className="bg-white rounded-2xl shadow p-6">
           <p className="text-gray-600">
             La vista detallada por estudiante se consume desde la ruta del estudiante (
@@ -174,7 +353,7 @@ function SimulacroResults() {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <div className="w-12 h-12 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderColor: PRIMARY, borderTopColor: 'transparent' }} />
           <p className="text-gray-600 font-medium">Cargando resultados...</p>
         </div>
       </div>
@@ -210,129 +389,126 @@ function SimulacroResults() {
       ? Math.round((new Date(result.endTime) - new Date(result.startTime)) / 60000)
       : null;
 
+  const activeModule = moduleRows.find((m) => m.moduleName === selectedModule) || null;
+
   return (
     <div className="space-y-6 pb-10">
+      {showCalcModal ? <CalcModal onClose={() => setShowCalcModal(false)} /> : null}
 
-      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-      <div
-        className="rounded-2xl p-8 text-white"
-        style={{
-          background: 'linear-gradient(135deg, #0A2E57 0%, #1e4080 55%, #2563eb 100%)',
-        }}
-      >
-        <p className="text-blue-300 text-xs font-semibold uppercase tracking-widest mb-2">
-          ICFES Saber 11
-        </p>
-        <h1 className="text-3xl font-bold mb-1">Resultados del Simulacro ICFES</h1>
-        <h2 className="text-xl text-blue-200 font-medium mb-4">{simulacroTitle}</h2>
-        <p className="text-blue-100 text-sm max-w-2xl leading-relaxed">
-          Este simulacro es una herramienta para identificar tus fortalezas y áreas de mejora.
-          Usa estos resultados para focalizar tu estudio y alcanzar tu mejor puntaje.
-        </p>
+      {/* ── Título + exportar ─────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between print:hidden">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">SIEPA · Saber 11</p>
+          <h1 className="text-2xl font-bold" style={{ color: PRIMARY }}>Reporte general</h1>
+          <p className="text-sm text-slate-500">{simulacroTitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+        >
+          <span>🖨️</span> Exportar PDF
+        </button>
       </div>
+      <hr className="border-slate-200 print:hidden" />
 
-      {/* ── MÉTRICAS PRINCIPALES ────────────────────────────────────────────── */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── Reporte general: puntaje global + percentil ─────────────────────── */}
+      <section className="grid lg:grid-cols-[320px_1fr] gap-5">
         {/* Puntaje global */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 col-span-2 sm:col-span-1">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Puntaje Global
-          </p>
-          <div className="flex items-end gap-1">
-            <span className="text-5xl font-black text-[#0A2E57] leading-none">{globalScore}</span>
-            <span className="text-lg text-gray-400 pb-0.5">/500</span>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-500">Puntaje global</span>
+            <div>
+              <span className="text-4xl font-black leading-none" style={{ color: PRIMARY }}>{globalScore}</span>
+              <span className="text-base text-gray-400">/500</span>
+            </div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">Escala ICFES 0–500</p>
-          <div className="mt-3 w-full bg-gray-100 rounded-full h-1.5">
-            <div
-              className="h-1.5 rounded-full"
-              style={{
-                width: `${(globalScore / 500) * 100}%`,
-                background: 'linear-gradient(90deg, #2563eb, #1d4ed8)',
-              }}
-            />
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => setShowCalcModal(true)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors"
+              style={{ borderColor: ACCENT, color: ACCENT }}
+            >
+              ¿Cómo se calcula?
+            </button>
           </div>
+          <ComparisonCard comparison={comparison} scope={compareScope} onScopeChange={setCompareScope} />
         </div>
 
-        {/* Percentil */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 col-span-2 sm:col-span-1">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Percentil
-          </p>
-          <div className="flex items-end gap-1">
-            <span className="text-5xl font-black text-[#0A2E57] leading-none">{percentile}</span>
+        {/* Percentil general */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col justify-center gap-4">
+          <span className="text-sm font-semibold text-slate-500">¿En qué percentil estás?</span>
+          <div className="grid sm:grid-cols-2 gap-4 items-center">
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-sm text-slate-500">Referencia estadística SIEPA</span>
+                <span className="text-2xl font-black" style={{ color: PRIMARY }}>{percentile}</span>
+              </div>
+              <PercentileBar percentile={percentile} />
+            </div>
+            <p className="text-sm text-slate-600">
+              Tu puntaje superó al <strong>{percentile}%</strong> de una distribución estadística de referencia.
+            </p>
           </div>
-          <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
-            <div
-              className="h-2 rounded-full transition-all"
-              style={{
-                width: `${Math.min(percentile, 100)}%`,
-                backgroundColor: '#2563eb',
-              }}
-            />
-          </div>
-          <p className="text-xs text-blue-600 font-semibold mt-1.5">
-            Superaste al {percentile}% de los estudiantes
-          </p>
-        </div>
 
-        {/* Tiempo */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Tiempo Empleado
-          </p>
-          <div className="flex items-end gap-1">
-            <span className="text-5xl font-black text-[#0A2E57] leading-none">
-              {durationMinutes !== null ? durationMinutes : '—'}
-            </span>
-            {durationMinutes !== null && (
-              <span className="text-lg text-gray-400 pb-0.5">min</span>
-            )}
+          {/* Métricas secundarias */}
+          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+            <div>
+              <p className="text-xs text-slate-400">Tiempo empleado</p>
+              <p className="text-xl font-bold text-slate-700">
+                {durationMinutes !== null ? `${durationMinutes} min` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Respuestas correctas</p>
+              <p className="text-xl font-bold text-slate-700">{correctAnswers}/{totalAnswers}</p>
+            </div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">Duración total</p>
-        </div>
-
-        {/* Preguntas */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Respuestas
-          </p>
-          <div className="flex items-end gap-1">
-            <span className="text-5xl font-black text-[#0A2E57] leading-none">
-              {correctAnswers}
-            </span>
-            <span className="text-lg text-gray-400 pb-0.5">/{totalAnswers}</span>
-          </div>
-          <p className="text-xs text-gray-400 mt-2">Correctas de {totalAnswers} preguntas</p>
         </div>
       </section>
 
-      {/* ── PUNTAJE POR PRUEBA ──────────────────────────────────────────────── */}
+      {/* ── Puntaje por pruebas (tabs) ───────────────────────────────────────── */}
       {moduleRows.length > 0 && (
-        <section>
-          <h2 className="text-lg font-bold text-[#0A2E57] mb-4">Puntaje por Prueba</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {moduleRows.map((item) => (
-              <ModuleCard key={item.moduleName} item={item} />
-            ))}
-          </div>
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#ef4444' }} />
-              Nivel 1: 0–34
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#f97316' }} />
-              Nivel 2: 35–49
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#eab308' }} />
-              Nivel 3: 50–64
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#10b981' }} />
-              Nivel 4: 65–100
-            </span>
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <p className="text-lg font-bold px-5 pt-5" style={{ color: PRIMARY }}>Puntaje por pruebas</p>
+
+          {moduleRows.length > 1 ? (
+            <div className="flex gap-2 overflow-x-auto px-5 pt-4 pb-2">
+              {moduleRows.map((item) => {
+                const cfg = getAreaConfig(item.moduleName);
+                const score = thetaToModule(item.theta);
+                const active = selectedModule === item.moduleName;
+                return (
+                  <button
+                    key={item.moduleName}
+                    type="button"
+                    onClick={() => setSelectedModule(item.moduleName)}
+                    className="shrink-0 flex flex-col items-center gap-1 rounded-xl border-2 px-4 py-2.5 min-w-[110px] transition-colors duration-150"
+                    style={active ? { borderColor: cfg.color, backgroundColor: cfg.bg } : { borderColor: '#e2e8f0' }}
+                  >
+                    <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">{item.moduleName}</span>
+                    <span className="flex items-center gap-1">
+                      <span>{cfg.icon}</span>
+                      <span className="text-lg font-black" style={{ color: cfg.color }}>{score}</span>
+                      <span className="text-xs text-slate-400">/100</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="border-t border-slate-100 mt-1">
+            {activeModule ? (
+              <AreaDetailPanel moduleItem={activeModule} />
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center px-5">
+                <span className="text-3xl">💡</span>
+                <span className="text-sm font-semibold text-slate-600">Conoce a detalle tus resultados</span>
+                <span className="text-xs text-slate-400">Da clic sobre una de las pruebas arriba</span>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -340,7 +516,7 @@ function SimulacroResults() {
       {/* ── DETALLE DE RESPUESTAS ───────────────────────────────────────────── */}
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-[#0A2E57]">Detalle de respuestas</h2>
+          <h2 className="text-lg font-bold" style={{ color: PRIMARY }}>Detalle de respuestas</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             {correctAnswers} correctas · {wrongAnswers.length} incorrectas de {totalAnswers} preguntas
           </p>
@@ -438,9 +614,7 @@ function SimulacroResults() {
                             disabled={exp?.loading}
                             className="inline-flex items-center gap-1.5 text-xs rounded-lg px-3 py-1.5 font-semibold text-white transition-all disabled:opacity-60 whitespace-nowrap"
                             style={{
-                              background: exp?.loading
-                                ? '#9ca3af'
-                                : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                              backgroundColor: exp?.loading ? '#9ca3af' : studentTokens.colors.violet,
                             }}
                           >
                             {exp?.loading ? (
@@ -468,7 +642,7 @@ function SimulacroResults() {
 
       {/* ── HINT INCORRECTAS ────────────────────────────────────────────────── */}
       {wrongAnswers.length > 0 && (
-        <div className="rounded-xl border border-violet-100 bg-violet-50 px-5 py-4 text-sm text-violet-700">
+        <div className="rounded-xl border border-violet-100 bg-violet-50 px-5 py-4 text-sm text-violet-700 print:hidden">
           <span className="font-semibold">💡 Consejo:</span> Tienes{' '}
           <strong>{wrongAnswers.length}</strong> pregunta
           {wrongAnswers.length !== 1 ? 's' : ''} incorrecta
@@ -479,7 +653,7 @@ function SimulacroResults() {
       )}
 
       {/* ── BOTONES FINALES ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3 pt-2">
+      <div className="flex flex-wrap gap-3 pt-2 print:hidden">
         <button
           type="button"
           onClick={() => navigate('/dashboard/estudiante')}
@@ -491,16 +665,9 @@ function SimulacroResults() {
           type="button"
           onClick={() => navigate('/dashboard/estudiante/simulacros')}
           className="px-5 py-2.5 rounded-xl font-medium text-sm text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#0A2E57' }}
+          style={{ backgroundColor: PRIMARY }}
         >
           Ver mis simulacros
-        </button>
-        <button
-          type="button"
-          onClick={() => alert('Función de compartir próximamente disponible.')}
-          className="px-5 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-medium text-sm hover:bg-blue-100 transition-colors"
-        >
-          ↗ Compartir resultados
         </button>
       </div>
     </div>

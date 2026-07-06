@@ -4,6 +4,7 @@ import { login } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
 import FormField from '../components/ui/FormField';
 import Spinner from '../components/ui/Spinner';
+import Button from '../components/ui/Button';
 
 const dashboardByRole = {
   admin: '/dashboard/admin',
@@ -123,14 +124,14 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#e8f2ff_0%,#f4f7fc_40%,#f8fafc_100%)] p-4 sm:p-6 lg:p-10">
-      <div className="mx-auto flex min-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_20px_60px_-32px_rgba(15,45,82,0.35)] lg:flex-row">
+    <div className="min-h-screen bg-background p-4 sm:p-6 lg:p-10">
+      <div className="mx-auto flex min-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-background-card shadow-[0_30px_70px_-32px_rgba(11,61,92,0.3)] lg:flex-row">
         <section className="w-full p-6 sm:p-10 lg:w-1/2 lg:p-12">
           <div className="mx-auto w-full max-w-md space-y-6">
             <div className="space-y-2">
               <img src="/logo-siepa.png" alt="SIEPA" className="h-14 w-auto" />
-              <h1 className="text-3xl font-bold tracking-tight text-[#0A2E57]">Bienvenido a SIEPA</h1>
-              <p className="text-sm text-slate-600">Inicia sesion para continuar.</p>
+              <h1 className="font-heading text-3xl font-extrabold tracking-tight text-primary">Bienvenido a SIEPA</h1>
+              <p className="text-sm font-sans text-text-secondary">Inicia sesion para continuar.</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
@@ -197,12 +198,7 @@ function Login() {
 
               {apiError ? <p className="text-sm text-red-600">{apiError}</p> : null}
 
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0A2E57] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#082443] disabled:cursor-not-allowed disabled:opacity-70"
-                tabIndex={5}
-              >
+              <Button type="submit" disabled={!canSubmit} className="w-full" tabIndex={5}>
                 {loading ? (
                   <>
                     <Spinner className="h-4 w-4" label="Ingresando" />
@@ -211,7 +207,7 @@ function Login() {
                 ) : (
                   'Ingresar'
                 )}
-              </button>
+              </Button>
             </form>
 
             <p className="text-xs text-slate-500">
@@ -223,11 +219,11 @@ function Login() {
           </div>
         </section>
 
-        <aside className="relative hidden w-full overflow-hidden bg-gradient-to-br from-[#0A2E57] via-[#11427a] to-[#00A3E0] p-10 text-white lg:flex lg:w-1/2 lg:flex-col lg:justify-between">
+        <aside className="relative hidden w-full overflow-hidden bg-gradient-to-br from-primary via-primary-light to-secondary p-10 text-white lg:flex lg:w-1/2 lg:flex-col lg:justify-between">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.20),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(255,255,255,0.14),transparent_30%)]" />
           <div className="relative z-10 max-w-sm space-y-3">
-            <h2 className="text-2xl font-semibold">Tu rendimiento, en tiempo real</h2>
-            <p className="text-sm text-sky-100">Analitica clara para tomar mejores decisiones academicas cada semana.</p>
+            <h2 className="font-heading text-2xl font-extrabold">Tu rendimiento, en tiempo real</h2>
+            <p className="text-sm font-sans text-sky-100">Analitica clara para tomar mejores decisiones academicas cada semana.</p>
           </div>
 
           <div className="relative z-10 my-8">

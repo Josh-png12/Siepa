@@ -7,7 +7,7 @@ function StudentLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-[#f0f4fa]">
+    <div className="flex min-h-screen bg-background">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -20,17 +20,17 @@ function StudentLayout() {
 
       <div className="flex flex-1 flex-col min-w-0">
         {/* Mobile top bar */}
-        <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-background-card px-4 py-3 lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
+            className="rounded-xl p-1.5 text-text-secondary hover:bg-background transition-colors"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="font-bold text-[#1e3a5f] tracking-tight">SIEPA</span>
+          <span className="font-heading font-extrabold text-primary tracking-tight">SIEPA</span>
         </div>
 
         <main className="flex-1 overflow-auto p-4 md:p-8">

@@ -60,6 +60,7 @@ const initialForm = {
   competencia: '',
   dificultad: DIFICULTADES[1].value,
   tema: '',
+  fuente: '',
   cantidad: 3,
 };
 
@@ -89,7 +90,7 @@ function buildQuestionPayload(question, areaDb, dificultadDb, caseGroupId) {
 
 // ── TextBaseCard ──────────────────────────────────────────────────────────────
 
-function TextBaseCard({ textoBase, isEnglish }) {
+function TextBaseCard({ textoBase, isEnglish, fuente }) {
   return (
     <div className="rounded-xl border-2 border-slate-200 bg-slate-50 overflow-hidden">
       {/* Header bar */}
@@ -116,6 +117,11 @@ function TextBaseCard({ textoBase, isEnglish }) {
         <div className="bg-white rounded-lg border border-slate-200 px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto font-serif">
           {textoBase.contenido}
         </div>
+        {fuente ? (
+          <p className="text-right italic text-xs text-gray-500 mt-2 pt-2 border-t border-slate-200">
+            {fuente}
+          </p>
+        ) : null}
       </div>
 
       {/* Divider with label */}
@@ -277,6 +283,7 @@ function AIGenerateModal({ onClose, onQuestionAdded }) {
       caseGroupCreatingRef.current = createAICaseGroup({
         titulo: textoBase.titulo || 'Texto base generado por IA',
         contenido: textoBase.contenido,
+        fuente: form.fuente.trim() || undefined,
       }).then((res) => {
         caseGroupIdRef.current = res.id;
         return res.id;
@@ -363,6 +370,22 @@ function AIGenerateModal({ onClose, onQuestionAdded }) {
               />
             </div>
 
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium mb-1">
+                Fuente (opcional)
+              </label>
+              <input
+                type="text"
+                value={form.fuente}
+                onChange={(e) => setField('fuente', e.target.value)}
+                placeholder="Ej: Tomado y adaptado de: Autor, A. (Año). Título. Ciudad: Editorial."
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Se mostrará al pie del texto base que leerá el estudiante.
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1">Cantidad (1–10)</label>
               <input
@@ -415,7 +438,7 @@ function AIGenerateModal({ onClose, onQuestionAdded }) {
 
               {/* Texto base card (covers the whole batch) */}
               {textoBase?.contenido && (
-                <TextBaseCard textoBase={textoBase} isEnglish={areaEntry.isEnglish} />
+                <TextBaseCard textoBase={textoBase} isEnglish={areaEntry.isEnglish} fuente={form.fuente.trim()} />
               )}
 
               {/* Question cards */}

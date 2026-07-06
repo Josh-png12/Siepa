@@ -398,6 +398,7 @@ model CaseGroup {
   contextText   String?
   contextLatex  String?
   contextImages Json? // Array<{ url: string, caption?: string }>
+  source        String? // Bibliographic citation shown under the shared context, e.g. "Tomado y adaptado de: ..."
   createdById   String
   createdBy     User     @relation("CaseGroupCreatedBy", fields: [createdById], references: [id])
   updatedById   String?

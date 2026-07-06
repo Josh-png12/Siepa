@@ -56,7 +56,18 @@ const SIMULACRO_INCLUDE = {
               dificultadCualitativa: true,
               triParamA: true,
               triParamB: true,
-              triParamC: true
+              triParamC: true,
+              caseGroupId: true,
+              caseGroup: {
+                select: {
+                  id: true,
+                  title: true,
+                  contextText: true,
+                  contextLatex: true,
+                  contextImages: true,
+                  source: true
+                }
+              }
             }
           }
         }
@@ -703,6 +714,72 @@ const getStudentResultsForSimulacro = async (simulacroId, studentId) => {
   return result;
 };
 
+// Average overallTheta / per-module theta across peers who already submitted the
+// same simulacro — one cohort scoped to the student's course(s), one scoped to
+// the whole school. Used to power the "Promedio del curso / institucional"
+// comparison in the results screen (real peer data, not a simulated distribution).
+const avg = (values) => (values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null);
+
+const summarizeCohort = (rows) => {
+  const moduleMap = new Map();
+  rows.forEach((row) => {
+    (row.moduleThetas || []).forEach((mt) => {
+      if (!moduleMap.has(mt.moduleName)) moduleMap.set(mt.moduleName, []);
+      moduleMap.get(mt.moduleName).push(Number(mt.theta));
+    });
+  });
+
+  return {
+    count: rows.length,
+    avgOverallTheta: avg(rows.map((row) => Number(row.overallTheta ?? 0))),
+    modules: Array.from(moduleMap.entries()).map(([moduleName, thetas]) => ({
+      moduleName,
+      avgTheta: avg(thetas)
+    }))
+  };
+};
+
+const getSimulacroComparison = async (simulacroId, studentId, schoolId) => {
+  const student = await prisma.student.findUnique({ where: { userId: studentId }, select: { id: true } });
+
+  let courseUserIds = [];
+  if (student) {
+    const enrollments = await prisma.courseEnrollment.findMany({
+      where: { studentId: student.id },
+      select: { courseId: true }
+    });
+    const courseIds = [...new Set(enrollments.map((e) => e.courseId))];
+
+    if (courseIds.length) {
+      const courseMates = await prisma.courseEnrollment.findMany({
+        where: { courseId: { in: courseIds } },
+        select: { student: { select: { userId: true } } }
+      });
+      courseUserIds = [...new Set(courseMates.map((cm) => cm.student.userId))].filter((uid) => uid !== studentId);
+    }
+  }
+
+  const cohortSelect = { overallTheta: true, moduleThetas: { select: { moduleName: true, theta: true } } };
+
+  const [courseRows, schoolRows] = await Promise.all([
+    courseUserIds.length
+      ? prisma.simulacroResult.findMany({
+          where: { simulacroId, status: 'submitted', studentId: { in: courseUserIds } },
+          select: cohortSelect
+        })
+      : [],
+    prisma.simulacroResult.findMany({
+      where: { simulacroId, status: 'submitted', schoolId, NOT: { studentId } },
+      select: cohortSelect
+    })
+  ]);
+
+  return {
+    course: summarizeCohort(courseRows),
+    school: summarizeCohort(schoolRows)
+  };
+};
+
 module.exports = {
   buildError,
   createManualSimulacro,
@@ -715,5 +792,6 @@ module.exports = {
   getAvailableSimulacrosForStudent,
   startSimulacro,
   submitSimulacro,
-  getStudentResultsForSimulacro
+  getStudentResultsForSimulacro,
+  getSimulacroComparison
 };
